@@ -1,4 +1,4 @@
-export type WalkinPassStatus = 'registered' | 'checked_in' | 'expired'
+export type WalkinPassStatus = 'registered' | 'checked_in'
 
 export interface WalkinPass {
   id: string

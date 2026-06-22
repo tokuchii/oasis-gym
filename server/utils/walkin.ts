@@ -8,8 +8,11 @@ export function getVisitDateManila(date = new Date()): string {
 
 export function resolvePassStatus(pass: WalkinPass): WalkinPassStatus {
   const today = getVisitDateManila()
-  if (pass.visit_date < today) return 'expired'
-  if (pass.status === 'checked_in') return 'checked_in'
+  if (pass.status === 'checked_in' && pass.checked_in_at) {
+    const lastCheckout = new Date(pass.checked_in_at)
+    const lastCheckoutDate = getVisitDateManila(lastCheckout)
+    if (lastCheckoutDate >= today) return 'checked_in'
+  }
   return 'registered'
 }
 

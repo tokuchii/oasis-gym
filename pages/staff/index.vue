@@ -13,7 +13,7 @@ interface PassResult {
   phone: string
   emergencyContact: string
   visitDate: string
-  status: 'registered' | 'checked_in' | 'expired'
+  status: 'registered' | 'checked_in'
   createdAt: string
   checkedInAt: string | null
   checkedInBy: string | null
@@ -583,13 +583,13 @@ async function deleteClient(id: string, name: string) {
 function statusLabel(status: string) {
   if (status === 'registered') return 'Registered'
   if (status === 'checked_in') return 'Checked out'
-  return 'Expired'
+  return status
 }
 
 function statusClass(status: string) {
   if (status === 'registered') return 'text-gold'
   if (status === 'checked_in') return 'text-green-400'
-  return 'text-red-400'
+  return 'text-mist'
 }
 
 function exportReport() {
@@ -871,10 +871,9 @@ onUnmounted(() => {
             >
               {{ checkinLoading ? 'Checking out…' : 'Check Out Guest' }}
             </button>
-            <p v-else-if="selectedPass.status === 'checked_in'" class="text-green-400 text-xs sm:text-sm text-center">
-              Already checked out{{ selectedPass.checkedInAt ? ` at ${new Date(selectedPass.checkedInAt).toLocaleTimeString()}` : '' }}.
+            <p v-else class="text-green-400 text-xs sm:text-sm text-center">
+              Already checked out today. Come back tomorrow for another session.
             </p>
-            <p v-else class="text-red-400 text-xs sm:text-sm text-center">This pass has expired.</p>
 
             <p v-if="checkinMessage" class="text-green-400 text-xs sm:text-sm text-center mt-3 sm:mt-4">{{ checkinMessage }}</p>
             <p v-if="checkinError" class="text-red-400 text-xs sm:text-sm text-center mt-3 sm:mt-4">{{ checkinError }}</p>

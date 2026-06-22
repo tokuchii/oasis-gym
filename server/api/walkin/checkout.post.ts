@@ -19,12 +19,12 @@ export default defineEventHandler(async (event) => {
   }
 
   const supabase = useSupabaseAdmin()
+  const today = getVisitDateManila()
+
   const { data, error } = await supabase
     .from('walkin_passes')
     .select('*')
     .eq('pass_code', passCode)
-    .order('created_at', { ascending: false })
-    .limit(1)
     .maybeSingle()
 
   if (error) {
@@ -35,26 +35,25 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Pass not found. This QR code is not registered.' })
   }
 
-  const today = getVisitDateManila()
+  if (data.status === 'checked_in' && data.checked_in_at) {
+    const lastCheckout = new Date(data.checked_in_at)
+    const lastCheckoutDate = getVisitDateManila(lastCheckout)
 
-  if (data.visit_date < today) {
-    throw createError({ statusCode: 410, statusMessage: 'This pass has expired. Register a new walk-in for today.' })
-  }
-
-  if (data.status === 'checked_in') {
-    throw createError({ statusCode: 409, statusMessage: 'This pass was already checked out today.' })
+    if (lastCheckoutDate >= today) {
+      throw createError({ statusCode: 409, statusMessage: 'Already checked out today. Come back tomorrow for another session.' })
+    }
   }
 
   const { data: updated, error: updateError } = await supabase
     .from('walkin_passes')
     .update({
       status: 'checked_in',
+      visit_date: today,
       payment_amount: paymentAmount,
       checked_in_at: new Date().toISOString(),
       checked_in_by: 'staff',
     })
     .eq('pass_code', passCode)
-    .eq('visit_date', today)
     .select('*')
     .single()
 
