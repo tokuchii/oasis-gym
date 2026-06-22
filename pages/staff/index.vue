@@ -483,6 +483,36 @@ function statusClass(status: string) {
   return 'text-red-400'
 }
 
+function exportReport() {
+  if (!reportData.value) return
+
+  const rows: string[] = []
+  rows.push('Date,Name,Pass Code,Phone,Status,Amount')
+  for (const v of reportData.value.visits) {
+    const status = v.status === 'checked_in' ? 'Checked Out' : v.status === 'registered' ? 'Registered' : 'Expired'
+    const amount = v.paymentAmount ? `₱${v.paymentAmount}` : '—'
+    rows.push(`"${v.visitDate}","${v.fullName}","${v.passCode}","${v.phone}","${status}","${amount}"`)
+  }
+  rows.push('')
+  rows.push('Summary')
+  rows.push(`Total Visits,${reportData.value.summary.totalVisits}`)
+  rows.push(`Checked Out,${reportData.value.summary.checkedOut}`)
+  rows.push(`Total Revenue,₱${reportData.value.summary.totalRevenue}`)
+  rows.push(`Unique Members,${reportData.value.summary.uniqueMembers}`)
+  rows.push(`Period,${reportData.value.summary.period}`)
+  rows.push(`Date From,${reportData.value.summary.dateFrom}`)
+  rows.push(`Date To,${reportData.value.summary.dateTo}`)
+
+  const csv = rows.join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `oasis-report-${reportData.value.summary.dateFrom}-to-${reportData.value.summary.dateTo}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 onMounted(async () => {
   await checkSession()
 })
@@ -807,9 +837,14 @@ onUnmounted(() => {
                 <input v-model="reportStartDate" type="date" class="input-field text-[11px] sm:text-sm" />
                 <input v-model="reportEndDate" type="date" class="input-field text-[11px] sm:text-sm" />
               </div>
-              <button type="button" class="btn-primary shrink-0" :disabled="reportLoading" @click="loadReports">
-                {{ reportLoading ? 'Loading…' : 'Load Report' }}
-              </button>
+              <div class="flex gap-2">
+                <button type="button" class="btn-primary shrink-0" :disabled="reportLoading" @click="loadReports">
+                  {{ reportLoading ? 'Loading…' : 'Load Report' }}
+                </button>
+                <button v-if="reportData" type="button" class="btn-outline shrink-0" @click="exportReport">
+                  Export CSV
+                </button>
+              </div>
             </div>
 
             <p v-if="reportError" class="text-red-400 text-xs sm:text-sm mb-3 sm:mb-4">{{ reportError }}</p>
@@ -839,26 +874,24 @@ onUnmounted(() => {
                   {{ reportPeriod === 'day' ? 'Hourly Breakdown' : reportPeriod === 'week' ? 'Weekly Breakdown' : 'Monthly Breakdown' }}
                 </h3>
                 <div class="overflow-x-auto">
-                  <div class="flex items-end gap-1 sm:gap-2 min-h-[140px] sm:min-h-[180px] px-1">
+                  <div class="flex items-end gap-2 sm:gap-3 min-h-[160px] sm:min-h-[200px] px-2 pb-8 relative">
                     <div
                       v-for="point in reportData.chartData"
                       :key="point.date"
-                      class="flex-1 flex flex-col items-center gap-1 min-w-[32px]"
+                      class="flex-1 flex flex-col items-center gap-1 min-w-[40px] sm:min-w-[50px]"
                     >
-                      <div class="w-full flex flex-col items-center gap-0.5">
-                        <span class="text-[8px] sm:text-[9px] text-gold font-medium">₱{{ point.revenue }}</span>
-                        <div
-                          class="w-full bg-gold rounded-t transition-all"
-                          :style="{ height: `${Math.max((point.revenue / maxRevenue) * 100, 8)}%`, minHeight: '20px' }"
-                          :title="`${point.label}: ₱${point.revenue} revenue, ${point.checkedOut} checked out`"
-                        />
-                      </div>
-                      <span class="text-[7px] sm:text-[9px] text-mist whitespace-nowrap">{{ point.label }}</span>
+                      <span class="text-[9px] sm:text-[11px] text-gold font-semibold">₱{{ point.revenue }}</span>
+                      <div
+                        class="w-full bg-gold rounded-t transition-all"
+                        :style="{ height: `${Math.max((point.revenue / maxRevenue) * 100, 10)}%`, minHeight: '24px' }"
+                        :title="`${point.label}: ₱${point.revenue}`"
+                      />
+                      <span class="text-[10px] sm:text-xs text-cream font-medium mt-1">{{ point.label }}</span>
                     </div>
                   </div>
-                  <div class="flex items-center gap-2 mt-2 justify-center">
-                    <div class="w-2.5 h-2.5 bg-gold rounded-sm" />
-                    <span class="text-[9px] sm:text-[10px] text-mist">Revenue (₱65/check-out)</span>
+                  <div class="flex items-center gap-2 mt-1 justify-center">
+                    <div class="w-3 h-3 bg-gold rounded-sm" />
+                    <span class="text-[10px] sm:text-xs text-mist">Revenue (₱65/check-out)</span>
                   </div>
                 </div>
               </div>
