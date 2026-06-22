@@ -1,7 +1,7 @@
 import { requireStaff } from '~/server/utils/auth'
 import { isValidPassCodeFormat, normalizePassCode } from '~/server/utils/pass-code'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
-import { getVisitDateManila, resolvePassStatus, serializePass } from '~/server/utils/walkin'
+import { getVisitDateManila, serializePass } from '~/server/utils/walkin'
 
 export default defineEventHandler(async (event) => {
   requireStaff(event)
@@ -28,17 +28,20 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Pass not found.' })
   }
 
-  const status = resolvePassStatus(data)
+  const today = getVisitDateManila()
 
-  if (status === 'expired') {
+  if (data.visit_date < today) {
     throw createError({ statusCode: 410, statusMessage: 'This pass has expired.' })
   }
 
-  if (status === 'checked_in') {
+  if (data.status === 'checked_in') {
     throw createError({ statusCode: 409, statusMessage: 'This pass has already been checked in.' })
   }
 
-  const today = getVisitDateManila()
+  if (data.status !== 'registered') {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid pass status.' })
+  }
+
   if (data.visit_date !== today) {
     throw createError({ statusCode: 410, statusMessage: 'This pass is not valid for today.' })
   }

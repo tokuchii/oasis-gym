@@ -19,10 +19,9 @@ export type WalkinDatabase = {
 }
 
 let client: SupabaseClient<WalkinDatabase> | null = null
+let clientUrl: string | null = null
 
 export function useSupabaseAdmin() {
-  if (client) return client
-
   const config = useRuntimeConfig()
   const url = config.supabaseUrl
   const key = config.supabaseServiceRoleKey
@@ -34,9 +33,12 @@ export function useSupabaseAdmin() {
     })
   }
 
+  if (client && clientUrl === url) return client
+
   client = createClient<WalkinDatabase>(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
+  clientUrl = url
 
   return client
 }

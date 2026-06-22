@@ -7,12 +7,19 @@ export default defineEventHandler(async (event) => {
   const supabase = useSupabaseAdmin()
   const visitDate = getVisitDateManila()
 
-  const { data: existing } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from('walkin_passes')
     .select('*')
     .eq('phone', payload.phone)
     .eq('visit_date', visitDate)
     .maybeSingle()
+
+  if (existingError) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: `Lookup failed [${existingError.code}]: ${existingError.message}`,
+    })
+  }
 
   if (existing) {
     const status = resolvePassStatus(existing)
@@ -48,13 +55,19 @@ export default defineEventHandler(async (event) => {
     }
 
     if (error?.code === '23505') {
+      if (error.message?.includes('phone')) {
+        throw createError({
+          statusCode: 409,
+          statusMessage: 'A day pass for this phone number is already registered today.',
+        })
+      }
       passCode = generatePassCode()
       continue
     }
 
     throw createError({
       statusCode: 500,
-      statusMessage: error?.message ?? 'Failed to create day pass.',
+      statusMessage: `Supabase error [${error?.code}]: ${error?.message}`,
     })
   }
 

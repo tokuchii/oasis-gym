@@ -17,7 +17,6 @@
     *::after {
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
-      transition-duration: 0.01ms !important;
     }
   }
 
@@ -44,11 +43,11 @@
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-8 py-3 bg-gold text-onyx font-semibold uppercase tracking-wider text-sm transition-colors duration-200 hover:bg-gold-light focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold;
+    @apply inline-flex items-center justify-center gap-2 px-8 py-3 bg-gold text-onyx font-semibold uppercase tracking-wider text-sm transition-colors duration-200 hover:bg-gold-light focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gold;
   }
 
   .btn-outline {
-    @apply inline-flex items-center justify-center gap-2 px-8 py-3 border border-gold text-gold font-semibold uppercase tracking-wider text-sm transition-colors duration-200 hover:bg-gold hover:text-onyx focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold;
+    @apply inline-flex items-center justify-center gap-2 px-8 py-3 border border-gold text-gold font-semibold uppercase tracking-wider text-sm transition-colors duration-200 hover:bg-gold hover:text-onyx focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gold;
   }
 
   .card {
@@ -56,7 +55,7 @@
   }
 
   .input-field {
-    @apply w-full bg-graphite border border-iron rounded-sm px-4 py-3 text-cream placeholder:text-mist/60 focus:border-gold focus:outline-none transition-colors;
+    @apply w-full bg-graphite border border-iron rounded-sm px-4 py-3 text-cream placeholder:text-mist/60 focus:border-gold focus:outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
   }
 }
 

@@ -50,7 +50,7 @@ export function verifyStaffSessionToken(token: string | undefined): boolean {
 export function setStaffSession(event: H3Event) {
   setCookie(event, COOKIE_NAME, createStaffSessionToken(), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging',
     sameSite: 'lax',
     path: '/',
     maxAge: SESSION_TTL_MS / 1000,

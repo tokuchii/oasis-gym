@@ -118,6 +118,7 @@ const walkinSubmitError = ref('')
 
 const heroRef = ref<HTMLElement | null>(null)
 const parallaxRef = ref<HTMLElement | null>(null)
+let gsapCleanup: (() => void) | null = null
 
 function toggleMobileMenu() {
   mobileMenuOpen.value = !mobileMenuOpen.value
@@ -162,6 +163,9 @@ function validatePaymentForm(): boolean {
   if (!paymentForm.amount.trim()) {
     paymentErrors.amount = 'Amount is required'
     valid = false
+  } else if (!/^\d{1,6}(\.\d{1,2})?$/.test(paymentForm.amount.trim())) {
+    paymentErrors.amount = 'Enter a valid amount (e.g. 1499 or 1499.50)'
+    valid = false
   }
   if (!paymentReceipt.value) {
     paymentErrors.receipt = 'Payment receipt is required'
@@ -201,7 +205,25 @@ function validateWalkinForm(): boolean {
 
 function handleReceiptChange(event: Event) {
   const input = event.target as HTMLInputElement
-  paymentReceipt.value = input.files?.[0] ?? null
+  const file = input.files?.[0] ?? null
+  if (!file) {
+    paymentReceipt.value = null
+    return
+  }
+  const maxSize = 5 * 1024 * 1024
+  if (file.size > maxSize) {
+    paymentErrors.receipt = 'File must be under 5MB'
+    input.value = ''
+    return
+  }
+  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+  if (!allowed.includes(file.type)) {
+    paymentErrors.receipt = 'Only JPEG, PNG, WebP, or PDF files are accepted'
+    input.value = ''
+    return
+  }
+  delete paymentErrors.receipt
+  paymentReceipt.value = file
 }
 
 async function submitPaymentForm() {
@@ -212,6 +234,7 @@ async function submitPaymentForm() {
   await new Promise((r) => setTimeout(r, 1500))
   paymentSubmitting.value = false
   paymentSuccess.value = true
+  setTimeout(() => { paymentSuccess.value = false }, 8000)
 
   Object.assign(paymentForm, {
     fullName: '',
@@ -251,7 +274,11 @@ async function submitWalkinForm() {
     })
 
     walkinPassCode.value = data.passCode
-    walkinQrDataUrl.value = await generateWalkinQrDataUrl(data.qrPayload)
+    try {
+      walkinQrDataUrl.value = await generateWalkinQrDataUrl(data.qrPayload)
+    } catch {
+      walkinQrDataUrl.value = ''
+    }
     walkinSuccess.value = true
 
     Object.assign(walkinForm, {
@@ -287,40 +314,45 @@ onMounted(async () => {
   const { ScrollTrigger } = await import('gsap/ScrollTrigger')
   gsap.registerPlugin(ScrollTrigger)
 
-  gsap.from('.hero-label', { opacity: 0, y: 30, duration: 0.8, delay: 0.2 })
-  gsap.from('.hero-title', { opacity: 0, y: 50, duration: 1, delay: 0.4 })
-  gsap.from('.hero-subtitle', { opacity: 0, y: 30, duration: 0.8, delay: 0.7 })
-  gsap.from('.hero-cta', { opacity: 0, y: 20, duration: 0.6, delay: 1, stagger: 0.15 })
+  const ctx = gsap.context(() => {
+    gsap.from('.hero-label', { opacity: 0, y: 30, duration: 0.8, delay: 0.2 })
+    gsap.from('.hero-title', { opacity: 0, y: 50, duration: 1, delay: 0.4 })
+    gsap.from('.hero-subtitle', { opacity: 0, y: 30, duration: 0.8, delay: 0.7 })
+    gsap.from('.hero-cta', { opacity: 0, y: 20, duration: 0.6, delay: 1, stagger: 0.15 })
 
-  if (parallaxRef.value) {
-    gsap.to(parallaxRef.value, {
-      yPercent: 20,
-      ease: 'none',
-      scrollTrigger: {
-        trigger: heroRef.value,
-        start: 'top top',
-        end: 'bottom top',
-        scrub: true,
-      },
-    })
-  }
+    if (parallaxRef.value) {
+      gsap.to(parallaxRef.value, {
+        yPercent: 20,
+        ease: 'none',
+        scrollTrigger: {
+          trigger: heroRef.value,
+          start: 'top top',
+          end: 'bottom top',
+          scrub: true,
+        },
+      })
+    }
 
-  gsap.utils.toArray<HTMLElement>('.reveal').forEach((el) => {
-    gsap.from(el, {
-      opacity: 0,
-      y: 40,
-      duration: 0.8,
-      scrollTrigger: {
-        trigger: el,
-        start: 'top 85%',
-        toggleActions: 'play none none none',
-      },
+    gsap.utils.toArray<HTMLElement>('.reveal').forEach((el) => {
+      gsap.from(el, {
+        opacity: 0,
+        y: 40,
+        duration: 0.8,
+        scrollTrigger: {
+          trigger: el,
+          start: 'top 85%',
+          toggleActions: 'play none none none',
+        },
+      })
     })
   })
+
+  gsapCleanup = () => ctx.revert()
 })
 
 onUnmounted(() => {
   window.removeEventListener('scroll', handleScroll)
+  gsapCleanup?.()
 })
 </script>
 
@@ -553,7 +585,7 @@ onUnmounted(() => {
             <form class="space-y-4" @submit.prevent="submitPaymentForm">
               <div>
                 <label for="pay-name" class="block text-sm text-mist mb-1">Full Name *</label>
-                <input id="pay-name" v-model="paymentForm.fullName" type="text" class="input-field" />
+                <input id="pay-name" v-model="paymentForm.fullName" type="text" class="input-field" maxlength="100" />
                 <p v-if="paymentErrors.fullName" class="text-red-400 text-xs mt-1">{{ paymentErrors.fullName }}</p>
               </div>
 
@@ -598,12 +630,12 @@ onUnmounted(() => {
               <div class="grid sm:grid-cols-2 gap-4">
                 <div>
                   <label for="pay-ref" class="block text-sm text-mist mb-1">Reference No. *</label>
-                  <input id="pay-ref" v-model="paymentForm.referenceNo" type="text" class="input-field" />
+                  <input id="pay-ref" v-model="paymentForm.referenceNo" type="text" class="input-field" maxlength="20" />
                   <p v-if="paymentErrors.referenceNo" class="text-red-400 text-xs mt-1">{{ paymentErrors.referenceNo }}</p>
                 </div>
                 <div>
                   <label for="pay-amount" class="block text-sm text-mist mb-1">Amount Paid *</label>
-                  <input id="pay-amount" v-model="paymentForm.amount" type="text" class="input-field" placeholder="₱" />
+                  <input id="pay-amount" v-model="paymentForm.amount" type="text" class="input-field" placeholder="₱" maxlength="10" />
                   <p v-if="paymentErrors.amount" class="text-red-400 text-xs mt-1">{{ paymentErrors.amount }}</p>
                 </div>
               </div>
@@ -645,7 +677,7 @@ onUnmounted(() => {
             <form v-if="!walkinSuccess" class="space-y-4" @submit.prevent="submitWalkinForm">
               <div>
                 <label for="walk-name" class="block text-sm text-mist mb-1">Full Name *</label>
-                <input id="walk-name" v-model="walkinForm.fullName" type="text" class="input-field" />
+                <input id="walk-name" v-model="walkinForm.fullName" type="text" class="input-field" maxlength="100" />
                 <p v-if="walkinErrors.fullName" class="text-red-400 text-xs mt-1">{{ walkinErrors.fullName }}</p>
               </div>
 
@@ -657,14 +689,14 @@ onUnmounted(() => {
                 </div>
                 <div>
                   <label for="walk-phone" class="block text-sm text-mist mb-1">Phone *</label>
-                  <input id="walk-phone" v-model="walkinForm.phone" type="tel" class="input-field" />
+                  <input id="walk-phone" v-model="walkinForm.phone" type="tel" class="input-field" maxlength="13" placeholder="09XXXXXXXXX" />
                   <p v-if="walkinErrors.phone" class="text-red-400 text-xs mt-1">{{ walkinErrors.phone }}</p>
                 </div>
               </div>
 
               <div>
                 <label for="walk-emergency" class="block text-sm text-mist mb-1">Emergency Contact *</label>
-                <input id="walk-emergency" v-model="walkinForm.emergencyContact" type="text" class="input-field" placeholder="Name & phone number" />
+                <input id="walk-emergency" v-model="walkinForm.emergencyContact" type="text" class="input-field" maxlength="100" placeholder="Name & phone number" />
                 <p v-if="walkinErrors.emergencyContact" class="text-red-400 text-xs mt-1">{{ walkinErrors.emergencyContact }}</p>
               </div>
 

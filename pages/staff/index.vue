@@ -77,6 +77,7 @@ async function logout() {
 }
 
 function resetState() {
+  searchMode.value = 'code'
   searchResults.value = []
   selectedPass.value = null
   searchQuery.value = ''
@@ -110,7 +111,11 @@ function initScanner() {
       const match = searchResults.value.find((p) => p.passCode === code)
       if (match) selectPass(match)
     },
-    () => {},
+    (errorMessage) => {
+      if (errorMessage?.includes('NotAllowedError') || errorMessage?.includes('Permission')) {
+        searchError.value = 'Camera access denied. Please allow camera permission.'
+      }
+    },
   )
 }
 
@@ -148,6 +153,7 @@ function selectPass(pass: PassResult) {
 }
 
 async function checkIn(passCode: string) {
+  if (!window.confirm('Check in this guest?')) return
   checkinLoading.value = true
   checkinMessage.value = ''
   checkinError.value = ''

@@ -1,7 +1,11 @@
 import { requireStaff } from '~/server/utils/auth'
-import { isValidPassCodeFormat, normalizePassCode } from '~/server/utils/pass-code'
+import { normalizePassCode } from '~/server/utils/pass-code'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { getVisitDateManila, serializePass } from '~/server/utils/walkin'
+
+function escapeLike(input: string): string {
+  return input.replace(/[%_]/g, (c) => `\\${c}`)
+}
 
 export default defineEventHandler(async (event) => {
   requireStaff(event)
@@ -22,14 +26,14 @@ export default defineEventHandler(async (event) => {
   let request = supabase.from('walkin_passes').select('*')
 
   if (code) {
-    if (!isValidPassCodeFormat(code)) {
+    if (!/^OASIS-[A-Z0-9]{4,12}$/i.test(code)) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid pass code format.' })
     }
     request = request.eq('pass_code', code)
   } else if (phone) {
-    request = request.ilike('phone', `%${phone}%`).eq('visit_date', getVisitDateManila())
+    request = request.ilike('phone', `%${escapeLike(phone)}%`).eq('visit_date', getVisitDateManila())
   } else {
-    request = request.ilike('full_name', `%${name}%`).eq('visit_date', getVisitDateManila())
+    request = request.ilike('full_name', `%${escapeLike(name)}%`).eq('visit_date', getVisitDateManila())
   }
 
   const { data, error } = await request.order('created_at', { ascending: false }).limit(10)
