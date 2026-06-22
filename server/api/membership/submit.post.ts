@@ -7,7 +7,7 @@ export default defineEventHandler(async (event) => {
   const fullName = String(body?.fullName ?? '').trim()
   const email = String(body?.email ?? '').trim()
   const phone = String(body?.phone ?? '').trim()
-  const plan = String(body?.plan ?? '')
+  const planRaw = String(body?.plan ?? '').trim().toLowerCase()
   const coach = String(body?.coach ?? '').trim() || null
   const paymentMethod = String(body?.paymentMethod ?? '').trim()
   const referenceNo = String(body?.referenceNo ?? '').trim() || null
@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
   if (!/^(09|\+639)\d{9}$/.test(phone)) {
     throw createError({ statusCode: 400, statusMessage: 'Phone must be a valid Philippine mobile number (09XXXXXXXXX).' })
   }
-  if (plan !== 'weekly' && plan !== 'monthly') {
+  if (planRaw !== 'weekly' && planRaw !== 'monthly') {
     throw createError({ statusCode: 400, statusMessage: 'Invalid plan. Must be weekly or monthly.' })
   }
   if (!paymentMethod) {
@@ -43,7 +43,7 @@ export default defineEventHandler(async (event) => {
       full_name: fullName,
       email,
       phone,
-      plan,
+      plan: planRaw,
       coach,
       payment_method: paymentMethod,
       reference_no: referenceNo,
@@ -56,7 +56,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: error.message })
   }
 
-  sendCertificationEmail({ to: email, fullName, plan }).catch(() => {})
+  sendCertificationEmail({ to: email, fullName, plan: planRaw }).catch(() => {})
 
   return {
     message: 'Payment submitted successfully. A certification email has been sent to your email address.',
