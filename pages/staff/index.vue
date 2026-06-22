@@ -502,10 +502,14 @@ async function deleteCoach(id: string, name: string) {
 async function loadClients() {
   clientError.value = ''
   try {
-    const data = await $fetch<{ clients: ClientSession[] }>('/api/clients/list')
-    clientsList.value = data.clients
+    const [clientsData, coachesData] = await Promise.all([
+      $fetch<{ clients: ClientSession[] }>('/api/clients/list'),
+      $fetch<{ coaches: CoachItem[] }>('/api/coaches/list'),
+    ])
+    clientsList.value = clientsData.clients
+    coachesList.value = coachesData.coaches
   } catch {
-    clientError.value = 'Failed to load clients.'
+    clientError.value = 'Failed to load data.'
   }
 }
 
@@ -1190,9 +1194,29 @@ onUnmounted(() => {
 
         <!-- MANAGEMENT TAB -->
         <template v-if="activeTab === 'management'">
+          <!-- Summary Cards -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Total Clients</p>
+              <p class="font-display text-2xl sm:text-3xl text-gold">{{ clientsList.length }}</p>
+            </div>
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Active</p>
+              <p class="font-display text-2xl sm:text-3xl text-green-400">{{ clientsList.filter(c => c.status === 'active').length }}</p>
+            </div>
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Completed</p>
+              <p class="font-display text-2xl sm:text-3xl text-gold">{{ clientsList.filter(c => c.status === 'completed').length }}</p>
+            </div>
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Coaches</p>
+              <p class="font-display text-2xl sm:text-3xl text-gold">{{ coachesList.length }}</p>
+            </div>
+          </div>
+
           <!-- Add Client Form -->
-          <section class="card p-4 sm:p-6">
-            <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">Add Client</h2>
+          <section class="card p-4 sm:p-6 mb-4 sm:mb-6">
+            <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">Add New Client</h2>
             <form class="space-y-3 sm:space-y-4" @submit.prevent="addClient">
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
@@ -1246,129 +1270,135 @@ onUnmounted(() => {
             </form>
           </section>
 
-          <!-- Client Cards -->
+          <!-- Client Cards with Coach Filter -->
           <section class="card p-4 sm:p-6">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+            <div class="flex flex-col gap-3 mb-4 sm:mb-6">
               <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide">
-                Clients <span class="text-mist text-xs font-body">({{ filteredClients.length }})</span>
+                Client List
               </h2>
               <div class="flex gap-1.5 sm:gap-2 flex-wrap">
                 <button
                   type="button"
-                  class="px-2 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
-                  :class="clientCoachFilter === '' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
+                  class="px-2.5 sm:px-3 py-1.5 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                  :class="clientCoachFilter === '' ? 'border-gold text-gold bg-gold/10' : 'border-iron text-mist hover:border-gold/50'"
                   @click="clientCoachFilter = ''"
                 >
-                  All
+                  All ({{ clientsList.length }})
                 </button>
                 <button
                   v-for="coach in coachesList"
                   :key="coach.id"
                   type="button"
-                  class="px-2 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
-                  :class="clientCoachFilter === coach.fullName ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
+                  class="px-2.5 sm:px-3 py-1.5 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                  :class="clientCoachFilter === coach.fullName ? 'border-gold text-gold bg-gold/10' : 'border-iron text-mist hover:border-gold/50'"
                   @click="clientCoachFilter = coach.fullName"
                 >
-                  {{ coach.fullName }}
+                  {{ coach.fullName }} ({{ clientsList.filter(c => c.coach_name === coach.fullName).length }})
                 </button>
               </div>
             </div>
 
-            <div v-if="clientsList.length === 0" class="text-center py-6">
-              <p class="text-mist text-xs sm:text-sm">No clients yet. Add one above.</p>
+            <div v-if="clientsList.length === 0" class="text-center py-8">
+              <p class="text-mist text-xs sm:text-sm">No clients yet. Add your first client above.</p>
             </div>
 
-            <div v-else-if="filteredClients.length === 0" class="text-center py-6">
-              <p class="text-mist text-xs sm:text-sm">No clients for this coach.</p>
+            <div v-else-if="filteredClients.length === 0" class="text-center py-8">
+              <p class="text-mist text-xs sm:text-sm">No clients found for this coach.</p>
             </div>
 
-            <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            <div v-else class="space-y-3 sm:space-y-4">
               <div
                 v-for="client in filteredClients"
                 :key="client.id"
-                class="border p-3 sm:p-4 transition-colors"
-                :class="client.status === 'active' ? 'border-iron hover:border-gold/50' : client.status === 'completed' ? 'border-green-400/30 bg-green-400/5' : 'border-red-400/30 bg-red-400/5'"
+                class="border border-iron rounded-sm overflow-hidden transition-colors hover:border-gold/30"
               >
-                <!-- Client Details -->
-                <div class="flex items-start justify-between gap-2 mb-3">
-                  <div class="min-w-0">
-                    <p class="text-cream font-medium text-sm sm:text-base truncate">{{ client.client_name }}</p>
-                    <p class="text-mist text-[10px] sm:text-xs truncate">{{ client.client_email }}</p>
-                    <p class="text-mist text-[10px] sm:text-xs">{{ client.client_phone }}</p>
+                <!-- Client Header -->
+                <div class="flex items-center justify-between gap-3 p-3 sm:p-4 bg-graphite/50">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
+                      <span class="text-gold font-display text-sm sm:text-base">{{ client.client_name.charAt(0) }}</span>
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-cream font-medium text-sm sm:text-base truncate">{{ client.client_name }}</p>
+                      <p class="text-mist text-[10px] sm:text-xs">{{ client.client_phone }} · {{ client.client_email }}</p>
+                    </div>
                   </div>
                   <span
-                    class="text-[9px] sm:text-[10px] uppercase tracking-wider px-1.5 sm:px-2 py-0.5 shrink-0"
-                    :class="client.status === 'active' ? 'text-gold border border-gold/30' : client.status === 'completed' ? 'text-green-400 border border-green-400/30' : 'text-red-400 border border-red-400/30'"
+                    class="text-[9px] sm:text-[10px] uppercase tracking-wider px-2 sm:px-2.5 py-0.5 sm:py-1 shrink-0 font-medium"
+                    :class="client.status === 'active' ? 'text-gold bg-gold/10 border border-gold/30' : client.status === 'completed' ? 'text-green-400 bg-green-400/10 border border-green-400/30' : 'text-red-400 bg-red-400/10 border border-red-400/30'"
                   >
                     {{ client.status }}
                   </span>
                 </div>
 
-                <!-- Plan + Coach -->
-                <div class="flex items-center gap-2 mb-3 text-[10px] sm:text-xs">
-                  <span class="text-gold font-medium uppercase">{{ client.plan }}</span>
-                  <span v-if="client.coach_name" class="text-mist">• {{ client.coach_name }}</span>
-                </div>
-
-                <!-- Session Progress -->
-                <div class="mb-3">
-                  <div class="flex items-center justify-between mb-1">
-                    <span class="text-mist text-[10px] sm:text-xs">Sessions</span>
-                    <span class="text-cream text-[10px] sm:text-xs font-medium">{{ client.sessions_used }} / {{ client.total_sessions }}</span>
+                <!-- Client Body -->
+                <div class="p-3 sm:p-4 space-y-3">
+                  <!-- Plan + Coach Info -->
+                  <div class="flex items-center gap-3 text-[10px] sm:text-xs">
+                    <span class="px-1.5 sm:px-2 py-0.5 bg-gold/10 text-gold border border-gold/20 uppercase font-medium">{{ client.plan }}</span>
+                    <span v-if="client.coach_name" class="text-mist">Coach: <span class="text-cream">{{ client.coach_name }}</span></span>
+                    <span v-else class="text-mist italic">No coach assigned</span>
                   </div>
-                  <div class="w-full bg-graphite h-2 sm:h-2.5 rounded-full overflow-hidden">
+
+                  <!-- Session Progress -->
+                  <div>
+                    <div class="flex items-center justify-between mb-1.5">
+                      <span class="text-mist text-[10px] sm:text-xs">Session Progress</span>
+                      <span class="text-cream text-[10px] sm:text-xs font-medium">{{ client.sessions_used }} / {{ client.total_sessions }}</span>
+                    </div>
+                    <div class="w-full bg-iron/50 h-2 sm:h-2.5 rounded-full overflow-hidden">
+                      <div
+                        class="h-full rounded-full transition-all duration-500"
+                        :class="client.sessions_used >= client.total_sessions ? 'bg-green-400' : client.sessions_used > 0 ? 'bg-gold' : 'bg-iron'"
+                        :style="{ width: `${Math.max((client.sessions_used / client.total_sessions) * 100, 2)}%` }"
+                      />
+                    </div>
+                  </div>
+
+                  <!-- Session Dots -->
+                  <div class="flex flex-wrap gap-1.5">
                     <div
-                      class="h-full rounded-full transition-all duration-300"
-                      :class="client.sessions_used >= client.total_sessions ? 'bg-green-400' : 'bg-gold'"
-                      :style="{ width: `${(client.sessions_used / client.total_sessions) * 100}%` }"
-                    />
+                      v-for="s in client.total_sessions"
+                      :key="s"
+                      class="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center text-[9px] sm:text-[10px] font-semibold border transition-colors"
+                      :class="s <= client.sessions_used ? 'bg-gold text-onyx border-gold' : 'bg-graphite text-mist border-iron'"
+                    >
+                      {{ s }}
+                    </div>
                   </div>
-                </div>
 
-                <!-- Session Dots -->
-                <div class="flex flex-wrap gap-1 mb-3">
-                  <div
-                    v-for="s in client.total_sessions"
-                    :key="s"
-                    class="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center text-[9px] sm:text-[10px] font-medium border"
-                    :class="s <= client.sessions_used ? 'bg-gold text-onyx border-gold' : 'bg-graphite text-mist border-iron'"
-                  >
-                    {{ s }}
+                  <!-- Date Range -->
+                  <div class="flex items-center justify-between text-[9px] sm:text-[10px] text-mist pt-1 border-t border-iron/50">
+                    <span>Start: <span class="text-cream">{{ client.start_date }}</span></span>
+                    <span>End: <span class="text-cream">{{ client.end_date }}</span></span>
                   </div>
-                </div>
 
-                <!-- Date Range -->
-                <div class="flex items-center justify-between text-[9px] sm:text-[10px] text-mist mb-3">
-                  <span>{{ client.start_date }}</span>
-                  <span>→</span>
-                  <span>{{ client.end_date }}</span>
-                </div>
-
-                <!-- Actions -->
-                <div class="flex gap-2">
-                  <button
-                    v-if="client.status === 'active' && client.sessions_used < client.total_sessions"
-                    type="button"
-                    class="btn-primary flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2"
-                    @click="toggleSession(client.id, 'add_session')"
-                  >
-                    + Mark Session Done
-                  </button>
-                  <button
-                    v-if="client.sessions_used > 0"
-                    type="button"
-                    class="btn-outline flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2"
-                    @click="toggleSession(client.id, 'remove_session')"
-                  >
-                    − Undo Session
-                  </button>
-                  <button
-                    type="button"
-                    class="text-red-400 hover:text-red-300 text-[10px] sm:text-xs uppercase tracking-wider px-2 transition-colors"
-                    @click="deleteClient(client.id, client.client_name)"
-                  >
-                    Remove
-                  </button>
+                  <!-- Actions -->
+                  <div class="flex gap-2 pt-1">
+                    <button
+                      v-if="client.status === 'active' && client.sessions_used < client.total_sessions"
+                      type="button"
+                      class="btn-primary flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2"
+                      @click="toggleSession(client.id, 'add_session')"
+                    >
+                      + Complete Session
+                    </button>
+                    <button
+                      v-if="client.sessions_used > 0"
+                      type="button"
+                      class="btn-outline flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2"
+                      @click="toggleSession(client.id, 'remove_session')"
+                    >
+                      − Undo Session
+                    </button>
+                    <button
+                      type="button"
+                      class="text-red-400 hover:text-red-300 text-[10px] sm:text-xs uppercase tracking-wider px-2 sm:px-3 py-1.5 border border-red-400/30 hover:border-red-400/50 transition-colors"
+                      @click="deleteClient(client.id, client.client_name)"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
