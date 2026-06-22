@@ -25,11 +25,12 @@ export default defineEventHandler(async (event) => {
   }
 
   if (!expiring || expiring.length === 0) {
-    return { message: 'No expiring memberships found.', sent: 0 }
+    return { message: 'No expiring memberships found.', sent: 0, failed: 0, total: 0, errors: [] }
   }
 
   let sent = 0
   let failed = 0
+  const errors: { email: string; error: string }[] = []
 
   for (const member of expiring) {
     try {
@@ -46,8 +47,11 @@ export default defineEventHandler(async (event) => {
         .eq('id', member.id)
 
       sent++
-    } catch {
+    } catch (err) {
       failed++
+      const errMsg = err instanceof Error ? err.message : String(err)
+      errors.push({ email: member.email, error: errMsg })
+      console.error(`[Reminders] Failed to send to ${member.email}:`, errMsg)
     }
   }
 
@@ -56,5 +60,6 @@ export default defineEventHandler(async (event) => {
     sent,
     failed,
     total: expiring.length,
+    errors,
   }
 })

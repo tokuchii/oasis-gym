@@ -64,7 +64,7 @@ const loginPassword = ref('')
 const loginError = ref('')
 const loginSubmitting = ref(false)
 
-const activeTab = ref<'checkout' | 'walkin' | 'reports' | 'coaches' | 'management' | 'leaderboard'>('checkout')
+const activeTab = ref<'checkout' | 'walkin' | 'membership' | 'reports' | 'coaches' | 'management' | 'leaderboard'>('checkout')
 
 const walkinForm = reactive({
   fullName: '',
@@ -107,7 +107,7 @@ async function sendReminders() {
   reminderError.value = ''
 
   try {
-    const data = await $fetch<{ message: string; sent: number; failed: number }>('/api/membership/send-reinders', {
+    const data = await $fetch<{ message: string; sent: number; failed: number }>('/api/membership/send-reminders', {
       method: 'POST',
     })
     reminderMessage.value = data.message
@@ -436,6 +436,95 @@ async function checkIn(passCode: string) {
     checkinError.value = fetchErr.data?.statusMessage ?? 'Check-out failed.'
   } finally {
     checkinLoading.value = false
+  }
+}
+
+interface MembershipPayment {
+  id: string
+  fullName: string
+  email: string
+  phone: string
+  plan: 'weekly' | 'monthly'
+  coach: string | null
+  paymentMethod: string
+  referenceNo: string | null
+  amount: number
+  receiptUrl: string | null
+  status: 'pending' | 'approved' | 'rejected'
+  expiryDate: string | null
+  createdAt: string
+}
+
+interface PaymentSummary {
+  total: number
+  pending: number
+  approved: number
+  rejected: number
+  totalRevenue: number
+}
+
+const paymentsList = ref<MembershipPayment[]>([])
+const paymentsSummary = ref<PaymentSummary | null>(null)
+const paymentsLoading = ref(false)
+const paymentsError = ref('')
+const paymentsStatusFilter = ref('')
+const paymentsCoachFilter = ref('')
+const paymentActionLoading = ref('')
+const receiptModalUrl = ref('')
+const receiptModalName = ref('')
+const receiptModalLoading = ref(false)
+
+async function openReceiptModal(url: string, name: string) {
+  receiptModalLoading.value = true
+  receiptModalUrl.value = ''
+  receiptModalName.value = name
+  try {
+    const data = await $fetch<{ signedUrl: string }>('/api/membership/receipt-url', {
+      method: 'POST',
+      body: { url },
+    })
+    receiptModalUrl.value = data.signedUrl
+  } catch {
+    receiptModalUrl.value = ''
+    receiptModalName.value = 'Failed to load receipt'
+  } finally {
+    receiptModalLoading.value = false
+  }
+}
+
+async function loadPayments() {
+  paymentsError.value = ''
+  paymentsLoading.value = true
+  try {
+    const params: Record<string, string> = {}
+    if (paymentsStatusFilter.value) params.status = paymentsStatusFilter.value
+    if (paymentsCoachFilter.value) params.coach = paymentsCoachFilter.value
+    const data = await $fetch<{ payments: MembershipPayment[]; summary: PaymentSummary }>('/api/membership/list', { params })
+    paymentsList.value = data.payments
+    paymentsSummary.value = data.summary
+  } catch {
+    paymentsError.value = 'Failed to load payments.'
+  } finally {
+    paymentsLoading.value = false
+  }
+}
+
+async function updatePaymentStatus(id: string, status: 'approved' | 'rejected') {
+  const label = status === 'approved' ? 'Approve' : 'Reject'
+  if (!window.confirm(`${label} this payment?`)) return
+
+  paymentActionLoading.value = id
+  try {
+    await $fetch('/api/membership/update-status', {
+      method: 'POST',
+      body: { id, status },
+    })
+    await loadPayments()
+  } catch (err: unknown) {
+    const fetchErr = err as { data?: { statusMessage?: string } }
+    paymentsError.value = fetchErr.data?.statusMessage ?? `Failed to ${label.toLowerCase()} payment.`
+  } finally {
+    paymentActionLoading.value = ''
   }
 }
 
@@ -774,6 +863,14 @@ onUnmounted(() => {
           <button
             type="button"
             class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
+            :class="activeTab === 'membership' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
+            @click="activeTab = 'membership'; loadPayments()"
+          >
+            Membership
+          </button>
+          <button
+            type="button"
+            class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
             :class="activeTab === 'reports' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
             @click="activeTab = 'reports'; loadReports()"
           >
@@ -1026,6 +1123,221 @@ onUnmounted(() => {
               </div>
             </template>
           </section>
+        </template>
+
+        <!-- MEMBERSHIP TAB -->
+        <template v-if="activeTab === 'membership'">
+          <!-- Summary Cards -->
+          <div v-if="paymentsSummary && !paymentsLoading" class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Total</p>
+              <p class="font-display text-2xl sm:text-3xl text-gold">{{ paymentsSummary.total }}</p>
+            </div>
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Pending</p>
+              <p class="font-display text-2xl sm:text-3xl text-yellow-400">{{ paymentsSummary.pending }}</p>
+            </div>
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Approved</p>
+              <p class="font-display text-2xl sm:text-3xl text-green-400">{{ paymentsSummary.approved }}</p>
+            </div>
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Revenue</p>
+              <p class="font-display text-2xl sm:text-3xl text-gold">₱{{ paymentsSummary.totalRevenue.toLocaleString() }}</p>
+            </div>
+          </div>
+
+          <section class="card p-4 sm:p-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+              <div>
+                <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide">Membership Payments</h2>
+                <p class="text-mist text-[10px] sm:text-xs mt-0.5">Review membership submissions, view receipts, and manage approvals.</p>
+              </div>
+              <button
+                type="button"
+                class="btn-outline text-[10px] sm:text-xs px-3 py-1.5 shrink-0"
+                :disabled="paymentsLoading"
+                @click="loadPayments()"
+              >
+                {{ paymentsLoading ? 'Loading…' : 'Refresh' }}
+              </button>
+            </div>
+
+            <!-- Filters -->
+            <div class="flex gap-1.5 sm:gap-2 mb-4 sm:mb-6 flex-wrap">
+              <button
+                type="button"
+                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                :class="paymentsStatusFilter === '' ? 'border-gold text-gold bg-gold/10' : 'border-iron text-mist hover:border-gold/50'"
+                @click="paymentsStatusFilter = ''; loadPayments()"
+              >
+                All
+              </button>
+              <button
+                type="button"
+                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                :class="paymentsStatusFilter === 'pending' ? 'border-yellow-400 text-yellow-400 bg-yellow-400/10' : 'border-iron text-mist hover:border-yellow-400/50'"
+                @click="paymentsStatusFilter = 'pending'; loadPayments()"
+              >
+                Pending
+              </button>
+              <button
+                type="button"
+                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                :class="paymentsStatusFilter === 'approved' ? 'border-green-400 text-green-400 bg-green-400/10' : 'border-iron text-mist hover:border-green-400/50'"
+                @click="paymentsStatusFilter = 'approved'; loadPayments()"
+              >
+                Approved
+              </button>
+              <button
+                type="button"
+                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                :class="paymentsStatusFilter === 'rejected' ? 'border-red-400 text-red-400 bg-red-400/10' : 'border-iron text-mist hover:border-red-400/50'"
+                @click="paymentsStatusFilter = 'rejected'; loadPayments()"
+              >
+                Rejected
+              </button>
+            </div>
+
+            <p v-if="paymentsError" class="text-red-400 text-xs sm:text-sm mb-3 sm:mb-4">{{ paymentsError }}</p>
+
+            <div v-if="paymentsLoading" class="text-center py-12">
+              <div class="inline-flex items-center gap-2 text-mist text-xs sm:text-sm">
+                <svg class="animate-spin h-4 w-4 text-gold" viewBox="0 0 24 24" fill="none">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Loading payments…
+              </div>
+            </div>
+
+            <div v-else-if="paymentsList.length === 0" class="text-center py-12">
+              <div class="text-4xl sm:text-5xl mb-3">💳</div>
+              <p class="text-cream text-sm sm:text-base font-medium">No payments found.</p>
+              <p class="text-mist text-[10px] sm:text-xs mt-1">Payments submitted from the website will appear here.</p>
+            </div>
+
+            <div v-else class="space-y-3 sm:space-y-4">
+              <div
+                v-for="payment in paymentsList"
+                :key="payment.id"
+                class="border border-iron rounded-sm overflow-hidden"
+              >
+                <!-- Payment Header -->
+                <div class="flex items-center justify-between gap-3 p-3 sm:p-4 bg-graphite/50">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
+                      <span class="text-gold font-display text-sm sm:text-base">{{ payment.fullName.charAt(0) }}</span>
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-cream font-medium text-sm sm:text-base truncate">{{ payment.fullName }}</p>
+                      <p class="text-mist text-[10px] sm:text-xs">{{ payment.phone }} · {{ payment.email }}</p>
+                    </div>
+                  </div>
+                  <span
+                    class="text-[9px] sm:text-[10px] uppercase tracking-wider px-2 sm:px-2.5 py-0.5 sm:py-1 shrink-0 font-medium"
+                    :class="payment.status === 'approved' ? 'text-green-400 bg-green-400/10 border border-green-400/30' : payment.status === 'rejected' ? 'text-red-400 bg-red-400/10 border border-red-400/30' : 'text-yellow-400 bg-yellow-400/10 border border-yellow-400/30'"
+                  >
+                    {{ payment.status }}
+                  </span>
+                </div>
+
+                <!-- Payment Body -->
+                <div class="p-3 sm:p-4 space-y-2.5 sm:space-y-3">
+                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 text-[10px] sm:text-xs">
+                    <div>
+                      <span class="text-mist block">Plan</span>
+                      <span class="text-cream font-medium uppercase">{{ payment.plan }}</span>
+                    </div>
+                    <div>
+                      <span class="text-mist block">Amount</span>
+                      <span class="text-gold font-display text-base sm:text-lg">₱{{ payment.amount.toLocaleString() }}</span>
+                    </div>
+                    <div>
+                      <span class="text-mist block">Coach</span>
+                      <span class="text-cream font-medium">{{ payment.coach ?? 'No preference' }}</span>
+                    </div>
+                    <div>
+                      <span class="text-mist block">Payment</span>
+                      <span class="text-cream font-medium uppercase">{{ payment.paymentMethod }}</span>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-2 sm:gap-3 text-[10px] sm:text-xs">
+                    <div>
+                      <span class="text-mist block">Reference No.</span>
+                      <span class="text-cream font-medium">{{ payment.referenceNo ?? '—' }}</span>
+                    </div>
+                    <div>
+                      <span class="text-mist block">Expiry</span>
+                      <span class="text-cream font-medium">{{ payment.expiryDate ?? '—' }}</span>
+                    </div>
+                  </div>
+
+                  <div class="text-[9px] sm:text-[10px] text-mist pt-1 border-t border-iron/50">
+                    Submitted: {{ new Date(payment.createdAt).toLocaleString() }}
+                  </div>
+
+                  <!-- Actions -->
+                  <div class="flex gap-2 pt-1">
+                    <button
+                      v-if="payment.receiptUrl"
+                      type="button"
+                      class="btn-outline flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2"
+                      @click="openReceiptModal(payment.receiptUrl, payment.fullName)"
+                    >
+                      View Receipt
+                    </button>
+                    <template v-if="payment.status === 'pending'">
+                      <button
+                        type="button"
+                        class="btn-primary flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2"
+                        :disabled="paymentActionLoading === payment.id"
+                        @click="updatePaymentStatus(payment.id, 'approved')"
+                      >
+                        {{ paymentActionLoading === payment.id ? 'Processing…' : 'Approve' }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-outline flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2 text-red-400 border-red-400/30 hover:border-red-400/50"
+                        :disabled="paymentActionLoading === payment.id"
+                        @click="updatePaymentStatus(payment.id, 'rejected')"
+                    >
+                      Reject
+                    </button>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Receipt Modal -->
+          <div v-if="receiptModalUrl || receiptModalLoading" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-onyx/90 backdrop-blur-sm" @click.self="receiptModalUrl = ''; receiptModalLoading = false">
+            <div class="bg-graphite border border-iron rounded-sm max-w-lg w-full max-h-[90vh] overflow-hidden">
+              <div class="flex items-center justify-between p-3 sm:p-4 border-b border-iron">
+                <div>
+                  <p class="text-cream font-medium text-sm sm:text-base">Receipt</p>
+                  <p class="text-mist text-[10px] sm:text-xs">{{ receiptModalName }}</p>
+                </div>
+                <button type="button" class="text-mist hover:text-cream transition-colors text-lg" @click="receiptModalUrl = ''; receiptModalLoading = false">
+                  ✕
+                </button>
+              </div>
+              <div class="p-3 sm:p-4 overflow-y-auto max-h-[70vh]">
+                <div v-if="receiptModalLoading" class="text-center py-10">
+                  <div class="inline-flex items-center gap-2 text-mist text-xs sm:text-sm">
+                    <svg class="animate-spin h-4 w-4 text-gold" viewBox="0 0 24 24" fill="none">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Loading receipt…
+                  </div>
+                </div>
+                <img v-else-if="receiptModalUrl" :src="receiptModalUrl" alt="Payment receipt" class="w-full rounded-sm" />
+              </div>
+            </div>
+          </div>
         </template>
 
         <!-- REPORTS TAB -->

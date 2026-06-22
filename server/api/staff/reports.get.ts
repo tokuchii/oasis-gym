@@ -58,14 +58,14 @@ export default defineEventHandler(async (event) => {
     email: p.email,
     visitDate: p.visit_date,
     status: p.status,
-    paymentAmount: p.payment_amount && p.payment_amount > 0 ? p.payment_amount : WALKIN_FEE,
+    paymentAmount: p.payment_amount && p.payment_amount > 0 ? p.payment_amount : null,
     createdAt: p.created_at,
     checkedInAt: p.checked_in_at,
   }))
 
   const totalVisits = serialized.length
   const checkedOut = serialized.filter((p) => p.status === 'checked_in').length
-  const totalRevenue = checkedOut * WALKIN_FEE
+  const totalRevenue = serialized.filter((p) => p.status === 'checked_in').reduce((sum, p) => sum + (p.paymentAmount ?? WALKIN_FEE), 0)
   const uniquePhones = new Set(serialized.map((p) => p.phone)).size
 
   const dailyBreakdown: Record<string, { visits: number; checkedOut: number; revenue: number }> = {}
@@ -76,7 +76,7 @@ export default defineEventHandler(async (event) => {
     dailyBreakdown[p.visitDate].visits++
     if (p.status === 'checked_in') {
       dailyBreakdown[p.visitDate].checkedOut++
-      dailyBreakdown[p.visitDate].revenue += WALKIN_FEE
+      dailyBreakdown[p.visitDate].revenue += p.paymentAmount ?? WALKIN_FEE
     }
   }
 

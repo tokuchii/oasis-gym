@@ -81,7 +81,10 @@ watch(() => paymentForm.plan, (newPlan) => {
 })
 
 const paymentReceipt = ref<File | null>(null)
+const receiptPreviewUrl = ref('')
 const paymentErrors = reactive<Record<string, string>>({})
+const showPaymentConfirm = ref(false)
+const showWalkinConfirm = ref(false)
 const paymentSubmitting = ref(false)
 const paymentSuccess = ref(false)
 
@@ -147,6 +150,19 @@ function validatePaymentForm(): boolean {
   if (!paymentForm.referenceNo.trim()) {
     paymentErrors.referenceNo = 'Reference number is required'
     valid = false
+  } else {
+    const ref = paymentForm.referenceNo.trim()
+    if (paymentForm.paymentMethod === 'gcash') {
+      if (!/^[A-Za-z0-9]{8,20}$/.test(ref)) {
+        paymentErrors.referenceNo = 'GCash ref must be 8–20 alphanumeric characters'
+        valid = false
+      }
+    } else if (paymentForm.paymentMethod === 'bank') {
+      if (!/^[A-Za-z0-9]{10,30}$/.test(ref)) {
+        paymentErrors.referenceNo = 'Bank ref must be 10–30 alphanumeric characters'
+        valid = false
+      }
+    }
   }
   if (!paymentForm.amount.trim()) {
     paymentErrors.amount = 'Amount is required'
@@ -199,6 +215,7 @@ function handleReceiptChange(event: Event) {
   const file = input.files?.[0] ?? null
   if (!file) {
     paymentReceipt.value = null
+    receiptPreviewUrl.value = ''
     return
   }
   const maxSize = 5 * 1024 * 1024
@@ -207,14 +224,27 @@ function handleReceiptChange(event: Event) {
     input.value = ''
     return
   }
-  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+  const allowed = ['image/jpeg', 'image/jpg']
   if (!allowed.includes(file.type)) {
-    paymentErrors.receipt = 'Only JPEG, PNG, WebP, or PDF files are accepted'
+    paymentErrors.receipt = 'Only JPEG images are accepted'
     input.value = ''
     return
   }
   delete paymentErrors.receipt
   paymentReceipt.value = file
+  if (file.type.startsWith('image/')) {
+    receiptPreviewUrl.value = URL.createObjectURL(file)
+  } else {
+    receiptPreviewUrl.value = ''
+  }
+}
+
+function onPaymentSubmit() {
+  if (validatePaymentForm()) showPaymentConfirm.value = true
+}
+
+function onWalkinSubmit() {
+  if (validateWalkinForm()) showWalkinConfirm.value = true
 }
 
 async function submitPaymentForm() {
@@ -223,18 +253,22 @@ async function submitPaymentForm() {
 
   paymentSubmitting.value = true
   try {
+    const formData = new FormData()
+    formData.append('fullName', paymentForm.fullName)
+    formData.append('email', paymentForm.email)
+    formData.append('phone', paymentForm.phone)
+    formData.append('plan', paymentForm.plan)
+    formData.append('coach', paymentForm.coach)
+    formData.append('paymentMethod', paymentForm.paymentMethod)
+    formData.append('referenceNo', paymentForm.referenceNo)
+    formData.append('amount', paymentForm.amount)
+    if (paymentReceipt.value) {
+      formData.append('receipt', paymentReceipt.value)
+    }
+
     await $fetch('/api/membership/submit', {
       method: 'POST',
-      body: {
-        fullName: paymentForm.fullName,
-        email: paymentForm.email,
-        phone: paymentForm.phone,
-        plan: paymentForm.plan,
-        coach: paymentForm.coach,
-        paymentMethod: paymentForm.paymentMethod,
-        referenceNo: paymentForm.referenceNo,
-        amount: Number(paymentForm.amount),
-      },
+      body: formData,
     })
     paymentSuccess.value = true
     setTimeout(() => { paymentSuccess.value = false }, 8000)
@@ -251,6 +285,7 @@ async function submitPaymentForm() {
       notes: '',
     })
     paymentReceipt.value = null
+    receiptPreviewUrl.value = ''
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
     paymentErrors.submit = fetchErr.data?.statusMessage ?? 'Submission failed. Please try again.'
@@ -619,60 +654,83 @@ onUnmounted(() => {
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-8 lg:gap-12">
           <!-- Payment Form -->
           <div class="reveal card p-4 sm:p-6 lg:p-8">
-            <h3 class="font-display text-lg sm:text-2xl text-cream tracking-wide mb-1 sm:mb-2">Manual Payment</h3>
-            <p class="text-mist text-[11px] sm:text-sm mb-3 sm:mb-6">
-              Pay via GCash or bank transfer, then upload your receipt below.
+            <h3 class="font-display text-lg sm:text-2xl text-cream tracking-wide mb-1 sm:mb-2">Membership Payment</h3>
+            <p class="text-mist text-[11px] sm:text-sm mb-3 sm:mb-5">
+              Choose a plan, pay via GCash or bank transfer, then upload your receipt.
             </p>
 
-            <div class="bg-graphite/50 border border-iron rounded-sm p-2.5 sm:p-4 mb-3 sm:mb-6 text-[11px] sm:text-sm space-y-0.5">
-              <p><span class="text-mist">GCash:</span> <span class="text-cream">09XX XXX XXXX</span></p>
-              <p><span class="text-mist">Bank:</span> <span class="text-cream">Account # XXX-XXX-XXX</span></p>
+            <!-- Payment Info -->
+            <div class="bg-graphite/50 border border-iron rounded-sm p-2.5 sm:p-4 mb-3 sm:mb-5 text-[11px] sm:text-sm space-y-0.5">
+              <p><span class="text-mist">GCash:</span> <span class="text-cream font-medium">09XX XXX XXXX</span></p>
+              <p><span class="text-mist">Bank:</span> <span class="text-cream font-medium">Account # XXX-XXX-XXX</span></p>
             </div>
 
-            <form class="space-y-2.5 sm:space-y-4" @submit.prevent="submitPaymentForm">
+            <form class="space-y-3 sm:space-y-5" @submit.prevent="onPaymentSubmit">
+              <!-- Plan Selection as Cards -->
               <div>
-                <label for="pay-name" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Full Name *</label>
-                <input id="pay-name" v-model="paymentForm.fullName" type="text" class="input-field" maxlength="100" />
-                <p v-if="paymentErrors.fullName" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.fullName }}</p>
-              </div>
-
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-4">
-                <div>
-                  <label for="pay-email" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Email *</label>
-                  <input id="pay-email" v-model="paymentForm.email" type="email" class="input-field" />
-                  <p v-if="paymentErrors.email" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.email }}</p>
+                <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">1. Select Plan *</label>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                  <label
+                    v-for="plan in membershipPlans"
+                    :key="plan.name"
+                    class="relative flex flex-col items-center text-center cursor-pointer p-3 sm:p-4 border-2 transition-all rounded-sm"
+                    :class="paymentForm.plan === plan.name
+                      ? 'border-gold bg-gold/5 shadow-lg shadow-gold/10'
+                      : 'border-iron hover:border-gold/40 bg-graphite/30'"
+                  >
+                    <input
+                      v-model="paymentForm.plan"
+                      type="radio"
+                      :value="plan.name"
+                      class="sr-only"
+                    />
+                    <span v-if="plan.featured" class="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-gold text-onyx text-[8px] sm:text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm">Popular</span>
+                    <span class="font-display text-xl sm:text-2xl text-cream tracking-wide">{{ plan.name }}</span>
+                    <span class="text-gold font-display text-base sm:text-lg mt-0.5">₱{{ plan.price }}<span class="text-mist text-[10px] sm:text-xs font-body">{{ plan.period }}</span></span>
+                  </label>
                 </div>
-                <div>
-                  <label for="pay-phone" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Phone *</label>
-                  <input id="pay-phone" v-model="paymentForm.phone" type="tel" class="input-field" maxlength="11" placeholder="09XXXXXXXXX" />
-                  <p v-if="paymentErrors.phone" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.phone }}</p>
+                <p v-if="paymentErrors.plan" class="text-red-400 text-[10px] sm:text-xs mt-1">{{ paymentErrors.plan }}</p>
+              </div>
+
+              <!-- Personal Info -->
+              <div>
+                <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">2. Your Details</label>
+                <div class="space-y-2.5 sm:space-y-3">
+                  <div>
+                    <label for="pay-name" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Full Name *</label>
+                    <input id="pay-name" v-model="paymentForm.fullName" type="text" class="input-field" maxlength="100" placeholder="Juan Dela Cruz" />
+                    <p v-if="paymentErrors.fullName" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.fullName }}</p>
+                  </div>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
+                    <div>
+                      <label for="pay-email" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Email *</label>
+                      <input id="pay-email" v-model="paymentForm.email" type="email" class="input-field" placeholder="you@email.com" />
+                      <p v-if="paymentErrors.email" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.email }}</p>
+                    </div>
+                    <div>
+                      <label for="pay-phone" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Phone *</label>
+                      <input id="pay-phone" v-model="paymentForm.phone" type="tel" class="input-field" maxlength="11" placeholder="09XXXXXXXXX" />
+                      <p v-if="paymentErrors.phone" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.phone }}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
 
+              <!-- Coach -->
               <div>
-                <label for="pay-plan" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Membership Plan *</label>
-                <select id="pay-plan" v-model="paymentForm.plan" class="input-field">
-                  <option value="" disabled>Select a plan</option>
-                  <option v-for="plan in membershipPlans" :key="plan.name" :value="plan.name">
-                    {{ plan.name }} — ₱{{ plan.price }}{{ plan.period }}
-                  </option>
-                </select>
-                <p v-if="paymentErrors.plan" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.plan }}</p>
-              </div>
-
-              <div>
-                <label for="pay-coach" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Preferred Coach</label>
+                <label for="pay-coach" class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">3. Preferred Coach (optional)</label>
                 <select id="pay-coach" v-model="paymentForm.coach" class="input-field">
                   <option value="">No preference</option>
                   <option v-for="coach in coachesList" :key="coach.id" :value="coach.fullName">
                     {{ coach.fullName }}{{ coach.specialty ? ` — ${coach.specialty}` : '' }}
                   </option>
                 </select>
-                <p v-if="coachesList.length === 0" class="text-mist text-[10px] sm:text-xs mt-0.5 italic">Coaches coming soon — select no preference for now.</p>
+                <p v-if="coachesList.length === 0" class="text-mist text-[10px] sm:text-xs mt-0.5 italic">No coaches available yet.</p>
               </div>
 
+              <!-- Payment Method -->
               <div>
-                <span class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">Payment Method</span>
+                <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">4. Payment Method *</label>
                 <div class="flex gap-3 sm:gap-4">
                   <label class="flex items-center gap-1.5 sm:gap-2 cursor-pointer">
                     <input v-model="paymentForm.paymentMethod" type="radio" value="gcash" class="accent-gold" />
@@ -685,42 +743,97 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-4">
-                <div>
-                  <label for="pay-ref" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Reference No. *</label>
-                  <input id="pay-ref" v-model="paymentForm.referenceNo" type="text" class="input-field" maxlength="20" />
-                  <p v-if="paymentErrors.referenceNo" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.referenceNo }}</p>
-                </div>
-                <div>
-                  <label for="pay-amount" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Amount Paid *</label>
-                  <input id="pay-amount" v-model="paymentForm.amount" type="text" class="input-field bg-graphite/50 cursor-not-allowed opacity-60" placeholder="Select a plan first" readonly disabled />
-                  <p v-if="paymentErrors.amount" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.amount }}</p>
+              <!-- Reference + Amount -->
+              <div>
+                <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">5. Payment Details</label>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
+                  <div>
+                    <label for="pay-ref" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Reference No. *</label>
+                    <input id="pay-ref" v-model="paymentForm.referenceNo" type="text" class="input-field" maxlength="30" :placeholder="paymentForm.paymentMethod === 'gcash' ? 'e.g. GC123456789' : 'e.g. BDO12345678901234'" />
+                    <p v-if="paymentForm.paymentMethod === 'gcash'" class="text-mist/50 text-[9px] sm:text-[10px] mt-0.5">8–20 alphanumeric characters</p>
+                    <p v-else-if="paymentForm.paymentMethod === 'bank'" class="text-mist/50 text-[9px] sm:text-[10px] mt-0.5">10–30 alphanumeric characters</p>
+                    <p v-if="paymentErrors.referenceNo" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.referenceNo }}</p>
+                  </div>
+                  <div>
+                    <label for="pay-amount" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Amount Paid *</label>
+                    <div class="relative">
+                      <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gold text-sm font-display">₱</span>
+                      <input id="pay-amount" v-model="paymentForm.amount" type="text" class="input-field pl-7 bg-graphite/50 cursor-not-allowed opacity-60" placeholder="Select a plan" readonly disabled />
+                    </div>
+                    <p v-if="paymentErrors.amount" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.amount }}</p>
+                  </div>
                 </div>
               </div>
 
+              <!-- Receipt Upload with Preview -->
               <div>
-                <label for="pay-receipt" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Upload Receipt *</label>
+                <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">6. Upload Receipt *</label>
+                <label
+                  for="pay-receipt"
+                  class="flex flex-col items-center justify-center cursor-pointer border-2 border-dashed transition-all rounded-sm p-4 sm:p-6"
+                  :class="paymentReceipt
+                    ? 'border-gold bg-gold/5'
+                    : 'border-iron hover:border-gold/40 bg-graphite/30'"
+                >
+                  <template v-if="paymentReceipt">
+                    <div class="relative w-full">
+                      <img
+                        v-if="paymentReceipt.type.startsWith('image/')"
+                        :src="receiptPreviewUrl"
+                        alt="Receipt preview"
+                        class="max-h-40 sm:max-h-48 mx-auto rounded-sm object-contain"
+                      />
+                      <div v-else class="flex items-center gap-2 justify-center py-4">
+                        <span class="text-2xl">📄</span>
+                        <span class="text-cream text-xs sm:text-sm">{{ paymentReceipt.name }}</span>
+                      </div>
+                      <button
+                        type="button"
+                        class="absolute top-1 right-1 bg-onyx/80 text-mist hover:text-cream w-6 h-6 flex items-center justify-center rounded-full text-xs"
+                        @click.prevent="paymentReceipt = null; receiptPreviewUrl = ''"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <p class="text-gold text-[10px] sm:text-xs mt-2">Change file</p>
+                  </template>
+                  <template v-else>
+                    <svg class="w-8 h-8 sm:w-10 sm:h-10 text-mist/50 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    <p class="text-cream text-[11px] sm:text-sm font-medium">Tap to upload receipt</p>
+                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">JPEG only — max 5MB</p>
+                  </template>
+                </label>
                 <input
                   id="pay-receipt"
                   type="file"
-                  accept="image/*,.pdf"
-                  class="input-field file:mr-2 sm:file:mr-4 file:py-0.5 sm:file:py-1 file:px-2 sm:file:px-3 file:border-0 file:bg-gold file:text-onyx file:text-[9px] sm:file:text-xs file:font-semibold file:uppercase"
+                  accept="image/jpeg,image/jpg"
+                  class="sr-only"
                   @change="handleReceiptChange"
                 />
-                <p v-if="paymentErrors.receipt" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.receipt }}</p>
+                <p v-if="paymentErrors.receipt" class="text-red-400 text-[10px] sm:text-xs mt-1">{{ paymentErrors.receipt }}</p>
               </div>
 
+              <!-- Notes -->
               <div>
-                <label for="pay-notes" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Notes (optional)</label>
-                <textarea id="pay-notes" v-model="paymentForm.notes" rows="2" class="input-field resize-none" />
+                <label for="pay-notes" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Notes (optional)</label>
+                <textarea id="pay-notes" v-model="paymentForm.notes" rows="2" class="input-field resize-none" placeholder="Any additional info..." />
               </div>
 
-              <button type="submit" class="btn-primary w-full" :disabled="paymentSubmitting">
-                {{ paymentSubmitting ? 'Submitting…' : 'Submit Payment' }}
+              <button type="submit" class="btn-primary w-full py-3" :disabled="paymentSubmitting">
+                <span v-if="paymentSubmitting" class="inline-flex items-center gap-2">
+                  <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Submitting…
+                </span>
+                <span v-else>Submit Payment</span>
               </button>
 
               <p v-if="paymentSuccess" class="text-green-400 text-[11px] sm:text-sm text-center">
-                Payment submitted! A certification email has been sent to your email address.
+                ✓ Payment submitted! A certification email has been sent to your email address.
               </p>
               <p v-if="paymentErrors.submit" class="text-red-400 text-[11px] sm:text-sm text-center">
                 {{ paymentErrors.submit }}
@@ -735,7 +848,7 @@ onUnmounted(() => {
               Register once to get a permanent QR code. Show it at the gym every visit — no need to register again.
             </p>
 
-            <form v-if="!walkinSuccess" class="space-y-2.5 sm:space-y-4" @submit.prevent="submitWalkinForm">
+            <form v-if="!walkinSuccess" class="space-y-2.5 sm:space-y-4" @submit.prevent="onWalkinSubmit">
               <div>
                 <label for="walk-name" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Full Name *</label>
                 <input id="walk-name" v-model="walkinForm.fullName" type="text" class="input-field" maxlength="100" />
@@ -778,7 +891,14 @@ onUnmounted(() => {
               <p v-if="walkinErrors.waiver" class="text-red-400 text-[10px] sm:text-xs">{{ walkinErrors.waiver }}</p>
 
               <button type="submit" class="btn-primary w-full" :disabled="walkinSubmitting">
-                {{ walkinSubmitting ? 'Registering…' : 'Register Walk-in' }}
+                <span v-if="walkinSubmitting" class="inline-flex items-center gap-2">
+                  <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Registering…
+                </span>
+                <span v-else>Register Walk-in</span>
               </button>
 
               <p v-if="walkinSubmitError" class="text-red-400 text-[11px] sm:text-sm text-center">{{ walkinSubmitError }}</p>
@@ -810,6 +930,73 @@ onUnmounted(() => {
         </div>
       </div>
     </section>
+
+    <!-- Payment Confirmation Modal -->
+    <div v-if="showPaymentConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-onyx/90 backdrop-blur-sm" @click.self="showPaymentConfirm = false">
+      <div class="bg-graphite border border-iron rounded-sm max-w-sm w-full p-5 sm:p-6 space-y-4">
+        <div class="text-center">
+          <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gold/10 border border-gold/30 mb-3">
+            <span class="text-gold text-xl">💳</span>
+          </div>
+          <h4 class="font-display text-lg sm:text-xl text-cream tracking-wide">Confirm Payment</h4>
+          <p class="text-mist text-[11px] sm:text-sm mt-1">Please review your details before submitting.</p>
+        </div>
+        <div class="space-y-1.5 text-[11px] sm:text-sm">
+          <div class="flex justify-between"><span class="text-mist">Plan</span><span class="text-cream font-medium">{{ paymentForm.plan }}</span></div>
+          <div class="flex justify-between"><span class="text-mist">Amount</span><span class="text-gold font-display text-base">₱{{ paymentForm.amount }}</span></div>
+          <div class="flex justify-between"><span class="text-mist">Name</span><span class="text-cream font-medium text-right">{{ paymentForm.fullName }}</span></div>
+          <div class="flex justify-between"><span class="text-mist">Phone</span><span class="text-cream font-medium">{{ paymentForm.phone }}</span></div>
+          <div v-if="paymentForm.coach" class="flex justify-between"><span class="text-mist">Coach</span><span class="text-cream font-medium">{{ paymentForm.coach }}</span></div>
+          <div class="flex justify-between"><span class="text-mist">Method</span><span class="text-cream font-medium uppercase">{{ paymentForm.paymentMethod }}</span></div>
+          <div class="flex justify-between"><span class="text-mist">Ref No.</span><span class="text-cream font-medium">{{ paymentForm.referenceNo }}</span></div>
+        </div>
+        <div class="flex gap-2">
+          <button type="button" class="btn-outline flex-1" @click="showPaymentConfirm = false">Cancel</button>
+          <button type="button" class="btn-primary flex-1" :disabled="paymentSubmitting" @click="showPaymentConfirm = false; submitPaymentForm()">
+            <span v-if="paymentSubmitting" class="inline-flex items-center gap-2">
+              <svg class="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Submitting…
+            </span>
+            <span v-else>Confirm & Submit</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Walk-in Confirmation Modal -->
+    <div v-if="showWalkinConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-onyx/90 backdrop-blur-sm" @click.self="showWalkinConfirm = false">
+      <div class="bg-graphite border border-iron rounded-sm max-w-sm w-full p-5 sm:p-6 space-y-4">
+        <div class="text-center">
+          <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gold/10 border border-gold/30 mb-3">
+            <span class="text-gold text-xl">📋</span>
+          </div>
+          <h4 class="font-display text-lg sm:text-xl text-cream tracking-wide">Confirm Registration</h4>
+          <p class="text-mist text-[11px] sm:text-sm mt-1">Is your information correct?</p>
+        </div>
+        <div class="space-y-1.5 text-[11px] sm:text-sm">
+          <div class="flex justify-between"><span class="text-mist">Name</span><span class="text-cream font-medium text-right">{{ walkinForm.fullName }}</span></div>
+          <div class="flex justify-between"><span class="text-mist">Email</span><span class="text-cream font-medium text-right">{{ walkinForm.email }}</span></div>
+          <div class="flex justify-between"><span class="text-mist">Phone</span><span class="text-cream font-medium">{{ walkinForm.phone }}</span></div>
+          <div class="flex justify-between"><span class="text-mist">Emergency</span><span class="text-cream font-medium text-right">{{ walkinForm.emergencyContact }}</span></div>
+        </div>
+        <div class="flex gap-2">
+          <button type="button" class="btn-outline flex-1" @click="showWalkinConfirm = false">Cancel</button>
+          <button type="button" class="btn-primary flex-1" :disabled="walkinSubmitting" @click="showWalkinConfirm = false; submitWalkinForm()">
+            <span v-if="walkinSubmitting" class="inline-flex items-center gap-2">
+              <svg class="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Registering…
+            </span>
+            <span v-else>Confirm & Register</span>
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- Hours + Location -->
     <section id="location" class="py-10 sm:py-20 lg:py-32">

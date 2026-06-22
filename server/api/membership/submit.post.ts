@@ -2,16 +2,25 @@ import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { sendCertificationEmail } from '~/server/utils/email'
 
 export default defineEventHandler(async (event) => {
-  const body = await readBody(event)
+  const formData = await readMultipartFormData(event)
+  if (!formData) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid form data.' })
+  }
 
-  const fullName = String(body?.fullName ?? '').trim()
-  const email = String(body?.email ?? '').trim()
-  const phone = String(body?.phone ?? '').trim()
-  const planRaw = String(body?.plan ?? '').trim().toLowerCase()
-  const coach = String(body?.coach ?? '').trim() || null
-  const paymentMethod = String(body?.paymentMethod ?? '').trim()
-  const referenceNo = String(body?.referenceNo ?? '').trim() || null
-  const amount = Number(body?.amount)
+  const getField = (name: string) => {
+    const field = formData.find((f) => f.name === name)
+    return field ? Buffer.from(field.data).toString('utf-8').trim() : ''
+  }
+
+  const fullName = getField('fullName')
+  const email = getField('email')
+  const phone = getField('phone')
+  const planRaw = getField('plan').toLowerCase()
+  const coach = getField('coach') || null
+  const paymentMethod = getField('paymentMethod')
+  const referenceNo = getField('referenceNo') || null
+  const amount = Number(getField('amount'))
+  const receiptFile = formData.find((f) => f.name === 'receipt')
 
   if (!fullName) {
     throw createError({ statusCode: 400, statusMessage: 'Full name is required.' })
@@ -34,6 +43,21 @@ export default defineEventHandler(async (event) => {
   if (isNaN(amount) || amount <= 0) {
     throw createError({ statusCode: 400, statusMessage: 'Valid payment amount is required.' })
   }
+  if (!receiptFile || !receiptFile.filename) {
+    throw createError({ statusCode: 400, statusMessage: 'Payment receipt is required.' })
+  }
+
+  const maxSize = 5 * 1024 * 1024
+  if (receiptFile.data.length > maxSize) {
+    throw createError({ statusCode: 400, statusMessage: 'Receipt file must be under 5MB.' })
+  }
+
+  const allowedTypes = ['image/jpeg']
+  const ext = receiptFile.filename?.split('.').pop()?.toLowerCase() ?? ''
+  const allowedExts = ['jpg', 'jpeg']
+  if (!allowedTypes.includes(receiptFile.type ?? '') && !allowedExts.includes(ext)) {
+    throw createError({ statusCode: 400, statusMessage: 'Only JPEG images (.jpg/.jpeg) are accepted.' })
+  }
 
   const now = new Date()
   const expiryDate = new Date(now)
@@ -46,6 +70,20 @@ export default defineEventHandler(async (event) => {
 
   const supabase = useSupabaseAdmin()
 
+  const filePath = `receipts/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+
+  const { error: uploadError } = await supabase
+    .storage
+    .from('oasis-gym')
+    .upload(filePath, receiptFile.data, {
+      contentType: receiptFile.type ?? 'image/jpeg',
+      upsert: false,
+    })
+
+  if (uploadError) {
+    throw createError({ statusCode: 500, statusMessage: `Failed to upload receipt: ${uploadError.message}` })
+  }
+
   const { data, error } = await supabase
     .from('membership_payments')
     .insert({
@@ -57,6 +95,7 @@ export default defineEventHandler(async (event) => {
       payment_method: paymentMethod,
       reference_no: referenceNo,
       amount,
+      receipt_url: filePath,
       expiry_date: expiryDateStr,
       reminder_sent: false,
     })
@@ -67,10 +106,22 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: error.message })
   }
 
-  sendCertificationEmail({ to: email, fullName, plan: planRaw }).catch(() => {})
+  let emailSent = false
+  let emailError = ''
+  try {
+    await sendCertificationEmail({ to: email, fullName, plan: planRaw })
+    emailSent = true
+  } catch (err) {
+    console.error('[Membership] Failed to send certification email:', err)
+    emailError = err instanceof Error ? err.message : String(err)
+  }
 
   return {
-    message: 'Payment submitted successfully. A certification email has been sent to your email address.',
+    message: emailSent
+      ? 'Payment submitted successfully. A certification email has been sent to your email address.'
+      : 'Payment submitted successfully. Email notification could not be sent — please check with staff.',
+    emailSent,
+    emailError: emailSent ? undefined : emailError,
     id: data.id,
   }
 })
