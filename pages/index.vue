@@ -693,7 +693,7 @@ onUnmounted(() => {
                 </div>
                 <div>
                   <label for="pay-amount" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Amount Paid *</label>
-                  <input id="pay-amount" v-model="paymentForm.amount" type="text" class="input-field bg-graphite/50" placeholder="Select a plan first" readonly />
+                  <input id="pay-amount" v-model="paymentForm.amount" type="text" class="input-field bg-graphite/50 cursor-not-allowed opacity-60" placeholder="Select a plan first" readonly disabled />
                   <p v-if="paymentErrors.amount" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.amount }}</p>
                 </div>
               </div>

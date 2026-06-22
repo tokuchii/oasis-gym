@@ -98,12 +98,24 @@ const coachesList = ref<CoachItem[]>([])
 const coachLoading = ref(false)
 const coachError = ref('')
 const coachSuccess = ref('')
+const editingCoach = ref<CoachItem | null>(null)
 const coachForm = reactive({
   fullName: '',
-  specialty: '',
+  specialty: [] as string[],
   bio: '',
   photoUrl: '',
 })
+
+const specialtyOptions = [
+  'Strength Training',
+  'Cardio & HIIT',
+  'Weight Loss',
+  'Yoga & Flexibility',
+  'CrossFit',
+  'Boxing & MMA',
+  'Rehabilitation',
+  'Sports Performance',
+]
 
 const scannerRef = ref<HTMLElement | null>(null)
 let scanner: Html5Qrcode | null = null
@@ -341,6 +353,24 @@ async function loadCoaches() {
   }
 }
 
+function resetCoachForm() {
+  coachForm.fullName = ''
+  coachForm.specialty = []
+  coachForm.bio = ''
+  coachForm.photoUrl = ''
+  editingCoach.value = null
+}
+
+function startEditCoach(coach: CoachItem) {
+  editingCoach.value = coach
+  coachForm.fullName = coach.fullName
+  coachForm.specialty = coach.specialty ? coach.specialty.split(', ').filter(Boolean) : []
+  coachForm.bio = coach.bio ?? ''
+  coachForm.photoUrl = coach.photoUrl ?? ''
+  coachError.value = ''
+  coachSuccess.value = ''
+}
+
 async function addCoach() {
   if (!coachForm.fullName.trim()) {
     coachError.value = 'Full name is required.'
@@ -356,20 +386,50 @@ async function addCoach() {
       method: 'POST',
       body: {
         fullName: coachForm.fullName,
-        specialty: coachForm.specialty,
+        specialty: coachForm.specialty.join(', '),
         bio: coachForm.bio,
         photoUrl: coachForm.photoUrl,
       },
     })
     coachSuccess.value = data.message
-    coachForm.fullName = ''
-    coachForm.specialty = ''
-    coachForm.bio = ''
-    coachForm.photoUrl = ''
+    resetCoachForm()
     await loadCoaches()
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
     coachError.value = fetchErr.data?.statusMessage ?? 'Failed to add coach.'
+  } finally {
+    coachLoading.value = false
+  }
+}
+
+async function updateCoach() {
+  if (!editingCoach.value) return
+  if (!coachForm.fullName.trim()) {
+    coachError.value = 'Full name is required.'
+    return
+  }
+
+  coachError.value = ''
+  coachSuccess.value = ''
+  coachLoading.value = true
+
+  try {
+    const data = await $fetch<{ message: string }>('/api/coaches/update', {
+      method: 'POST',
+      body: {
+        id: editingCoach.value.id,
+        fullName: coachForm.fullName,
+        specialty: coachForm.specialty.join(', '),
+        bio: coachForm.bio,
+        photoUrl: coachForm.photoUrl,
+      },
+    })
+    coachSuccess.value = data.message
+    resetCoachForm()
+    await loadCoaches()
+  } catch (err: unknown) {
+    const fetchErr = err as { data?: { statusMessage?: string } }
+    coachError.value = fetchErr.data?.statusMessage ?? 'Failed to update coach.'
   } finally {
     coachLoading.value = false
   }
@@ -819,17 +879,34 @@ onUnmounted(() => {
 
         <!-- COACHES TAB -->
         <template v-if="activeTab === 'coaches'">
-          <!-- Add Coach Form -->
+          <!-- Add/Edit Coach Form -->
           <section class="card p-4 sm:p-6">
-            <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">Add Coach</h2>
-            <form class="space-y-3 sm:space-y-4" @submit.prevent="addCoach">
+            <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">
+              {{ editingCoach ? 'Edit Coach' : 'Add Coach' }}
+            </h2>
+            <form class="space-y-3 sm:space-y-4" @submit.prevent="editingCoach ? updateCoach() : addCoach()">
               <div>
                 <label for="coach-name" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Full Name *</label>
                 <input id="coach-name" v-model="coachForm.fullName" type="text" class="input-field" maxlength="100" placeholder="Coach name" />
               </div>
               <div>
-                <label for="coach-specialty" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Specialty</label>
-                <input id="coach-specialty" v-model="coachForm.specialty" type="text" class="input-field" maxlength="100" placeholder="e.g. Strength Training, Cardio, Weight Loss" />
+                <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">Specialty</label>
+                <div class="grid grid-cols-2 gap-1.5 sm:gap-2">
+                  <label
+                    v-for="opt in specialtyOptions"
+                    :key="opt"
+                    class="flex items-center gap-1.5 sm:gap-2 cursor-pointer p-1.5 sm:p-2 border border-iron hover:border-gold/50 transition-colors"
+                    :class="coachForm.specialty.includes(opt) ? 'border-gold bg-gold/5' : ''"
+                  >
+                    <input
+                      type="checkbox"
+                      :value="opt"
+                      v-model="coachForm.specialty"
+                      class="accent-gold"
+                    />
+                    <span class="text-[10px] sm:text-xs text-cream">{{ opt }}</span>
+                  </label>
+                </div>
               </div>
               <div>
                 <label for="coach-bio" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Bio</label>
@@ -843,9 +920,14 @@ onUnmounted(() => {
               <p v-if="coachError" class="text-red-400 text-xs sm:text-sm">{{ coachError }}</p>
               <p v-if="coachSuccess" class="text-green-400 text-xs sm:text-sm">{{ coachSuccess }}</p>
 
-              <button type="submit" class="btn-primary w-full" :disabled="coachLoading">
-                {{ coachLoading ? 'Adding…' : 'Add Coach' }}
-              </button>
+              <div class="flex gap-2">
+                <button type="submit" class="btn-primary flex-1" :disabled="coachLoading">
+                  {{ coachLoading ? 'Saving…' : editingCoach ? 'Update Coach' : 'Add Coach' }}
+                </button>
+                <button v-if="editingCoach" type="button" class="btn-outline" @click="resetCoachForm">
+                  Cancel
+                </button>
+              </div>
             </form>
           </section>
 
@@ -859,20 +941,32 @@ onUnmounted(() => {
               <li
                 v-for="coach in coachesList"
                 :key="coach.id"
-                class="border border-iron p-3 sm:p-4 flex items-center justify-between gap-3"
+                class="border border-iron p-3 sm:p-4"
+                :class="editingCoach?.id === coach.id ? 'border-gold' : ''"
               >
-                <div class="min-w-0">
-                  <p class="text-cream font-medium text-sm sm:text-base">{{ coach.fullName }}</p>
-                  <p v-if="coach.specialty" class="text-gold text-[11px] sm:text-xs">{{ coach.specialty }}</p>
-                  <p v-if="coach.bio" class="text-mist text-[10px] sm:text-xs truncate mt-0.5">{{ coach.bio }}</p>
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="text-cream font-medium text-sm sm:text-base">{{ coach.fullName }}</p>
+                    <p v-if="coach.specialty" class="text-gold text-[11px] sm:text-xs mt-0.5">{{ coach.specialty }}</p>
+                    <p v-if="coach.bio" class="text-mist text-[10px] sm:text-xs truncate mt-0.5">{{ coach.bio }}</p>
+                  </div>
+                  <div class="flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      class="text-gold hover:text-gold-light text-[10px] sm:text-xs uppercase tracking-wider transition-colors"
+                      @click="startEditCoach(coach)"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      class="text-red-400 hover:text-red-300 text-[10px] sm:text-xs uppercase tracking-wider transition-colors"
+                      @click="deleteCoach(coach.id, coach.fullName)"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  class="text-red-400 hover:text-red-300 text-[10px] sm:text-xs uppercase tracking-wider shrink-0 transition-colors"
-                  @click="deleteCoach(coach.id, coach.fullName)"
-                >
-                  Remove
-                </button>
               </li>
             </ul>
           </section>
