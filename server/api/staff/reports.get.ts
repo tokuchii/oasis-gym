@@ -117,14 +117,13 @@ export default defineEventHandler(async (event) => {
     const year = now.getFullYear()
     const month = now.getMonth()
     const daysInMonth = getDaysInMonth(year, month)
-    const monthLabel = MONTH_NAMES[month]
 
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = `${year}-${padZero(month + 1)}-${padZero(day)}`
       const data = dailyBreakdown[dateStr]
       chartData.push({
         date: dateStr,
-        label: `${monthLabel} ${day}`,
+        label: String(day),
         visits: data?.visits ?? 0,
         checkedOut: data?.checkedOut ?? 0,
         revenue: data?.revenue ?? 0,
