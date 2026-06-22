@@ -51,13 +51,6 @@ const galleryZones = [
 const membershipPlans = MEMBERSHIP_PLANS
 const membershipPlansDisplay = MEMBERSHIP_PLANS_DISPLAY
 
-watch(() => paymentForm.plan, (newPlan) => {
-  const found = MEMBERSHIP_PLANS.find((p) => p.name === newPlan)
-  if (found) {
-    paymentForm.amount = found.price
-  }
-})
-
 const operatingHours = [
   { day: 'Monday – Friday', hours: '5:00 AM – 11:00 PM' },
   { day: 'Saturday', hours: '6:00 AM – 10:00 PM' },
@@ -79,6 +72,14 @@ const paymentForm = reactive({
   amount: '',
   notes: '',
 })
+
+watch(() => paymentForm.plan, (newPlan) => {
+  const found = MEMBERSHIP_PLANS.find((p) => p.name === newPlan)
+  if (found) {
+    paymentForm.amount = found.price
+  }
+})
+
 const paymentReceipt = ref<File | null>(null)
 const paymentErrors = reactive<Record<string, string>>({})
 const paymentSubmitting = ref(false)
