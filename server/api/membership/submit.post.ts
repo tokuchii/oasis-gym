@@ -1,0 +1,65 @@
+import { useSupabaseAdmin } from '~/server/utils/supabase'
+import { sendCertificationEmail } from '~/server/utils/email'
+
+export default defineEventHandler(async (event) => {
+  const body = await readBody(event)
+
+  const fullName = String(body?.fullName ?? '').trim()
+  const email = String(body?.email ?? '').trim()
+  const phone = String(body?.phone ?? '').trim()
+  const plan = String(body?.plan ?? '')
+  const coach = String(body?.coach ?? '').trim() || null
+  const paymentMethod = String(body?.paymentMethod ?? '').trim()
+  const referenceNo = String(body?.referenceNo ?? '').trim() || null
+  const amount = Number(body?.amount)
+
+  if (!fullName) {
+    throw createError({ statusCode: 400, statusMessage: 'Full name is required.' })
+  }
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw createError({ statusCode: 400, statusMessage: 'Valid email is required.' })
+  }
+  if (!phone) {
+    throw createError({ statusCode: 400, statusMessage: 'Phone number is required.' })
+  }
+  if (!/^(09|\+639)\d{9}$/.test(phone)) {
+    throw createError({ statusCode: 400, statusMessage: 'Phone must be a valid Philippine mobile number (09XXXXXXXXX).' })
+  }
+  if (plan !== 'weekly' && plan !== 'monthly') {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid plan. Must be weekly or monthly.' })
+  }
+  if (!paymentMethod) {
+    throw createError({ statusCode: 400, statusMessage: 'Payment method is required.' })
+  }
+  if (isNaN(amount) || amount <= 0) {
+    throw createError({ statusCode: 400, statusMessage: 'Valid payment amount is required.' })
+  }
+
+  const supabase = useSupabaseAdmin()
+
+  const { data, error } = await supabase
+    .from('membership_payments')
+    .insert({
+      full_name: fullName,
+      email,
+      phone,
+      plan,
+      coach,
+      payment_method: paymentMethod,
+      reference_no: referenceNo,
+      amount,
+    })
+    .select('*')
+    .single()
+
+  if (error) {
+    throw createError({ statusCode: 500, statusMessage: error.message })
+  }
+
+  sendCertificationEmail({ to: email, fullName, plan }).catch(() => {})
+
+  return {
+    message: 'Payment submitted successfully. A certification email has been sent to your email address.',
+    id: data.id,
+  }
+})

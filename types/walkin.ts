@@ -9,6 +9,7 @@ export interface WalkinPass {
   emergency_contact: string
   visit_date: string
   status: WalkinPassStatus
+  payment_amount: number | null
   created_at: string
   checked_in_at: string | null
   checked_in_by: string | null
@@ -28,3 +29,69 @@ export interface WalkinPassPublic {
   status: WalkinPassStatus
   qrPayload: string
 }
+
+export interface MembershipPayment {
+  id: string
+  full_name: string
+  email: string
+  phone: string
+  plan: 'weekly' | 'monthly'
+  coach: string | null
+  payment_method: string
+  reference_no: string | null
+  amount: number
+  receipt_url: string | null
+  status: 'pending' | 'approved' | 'rejected'
+  created_at: string
+}
+
+export interface Coach {
+  id: string
+  full_name: string
+  specialty: string | null
+  bio: string | null
+  photo_url: string | null
+  display_order: number
+  active: boolean
+  created_at: string
+}
+
+export interface CoachPayload {
+  fullName: string
+  specialty: string
+  bio: string
+  photoUrl: string
+}
+
+export const MEMBERSHIP_PLANS = [
+  {
+    id: 'weekly',
+    name: 'Weekly',
+    price: '599',
+    period: '/week',
+    features: ['7 days unlimited access', 'Locker use', '1 group class', 'Coach selection available'],
+    featured: true,
+  },
+  {
+    id: 'monthly',
+    name: 'Monthly',
+    price: '1,499',
+    period: '/month',
+    features: ['30 days unlimited access', 'Locker + towel', 'Unlimited group classes', 'Coach selection available', 'Fitness assessment'],
+    featured: false,
+  },
+]
+
+export const MEMBERSHIP_PLANS_DISPLAY = [
+  {
+    id: 'daily',
+    name: 'Daily (Walk-in)',
+    price: '65',
+    period: '/visit',
+    features: ['Full-day access', 'Locker use', 'No commitment', 'Permanent QR code'],
+    featured: false,
+  },
+  ...MEMBERSHIP_PLANS,
+]
+
+export const WALKIN_DEFAULT_FEE = 65

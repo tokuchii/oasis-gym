@@ -8,9 +8,14 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event)
   const passCode = normalizePassCode(String(body?.passCode ?? ''))
+  const paymentAmount = Number(body?.paymentAmount ?? 65)
 
   if (!isValidPassCodeFormat(passCode)) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid pass code.' })
+  }
+
+  if (isNaN(paymentAmount) || paymentAmount < 0) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid payment amount.' })
   }
 
   const supabase = useSupabaseAdmin()
@@ -42,14 +47,11 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid pass status.' })
   }
 
-  if (data.visit_date !== today) {
-    throw createError({ statusCode: 410, statusMessage: 'This pass is not valid for today.' })
-  }
-
   const { data: updated, error: updateError } = await supabase
     .from('walkin_passes')
     .update({
       status: 'checked_in',
+      payment_amount: paymentAmount,
       checked_in_at: new Date().toISOString(),
       checked_in_by: 'staff',
     })

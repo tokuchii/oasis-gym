@@ -35,19 +35,19 @@
 
 @layer components {
   .section-label {
-    @apply font-display text-gold text-sm tracking-[0.3em] uppercase;
+    @apply font-display text-gold text-[10px] sm:text-sm tracking-[0.25em] sm:tracking-[0.3em] uppercase;
   }
 
   .section-title {
-    @apply font-display text-4xl md:text-5xl lg:text-6xl text-cream leading-none tracking-wide;
+    @apply font-display text-[1.625rem] sm:text-4xl md:text-5xl lg:text-6xl text-cream leading-none tracking-wide break-words;
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-8 py-3 bg-gold text-onyx font-semibold uppercase tracking-wider text-sm transition-colors duration-200 hover:bg-gold-light focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gold;
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 sm:px-8 sm:py-3 bg-gold text-onyx font-semibold uppercase tracking-wider text-xs sm:text-sm transition-colors duration-200 hover:bg-gold-light focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gold;
   }
 
   .btn-outline {
-    @apply inline-flex items-center justify-center gap-2 px-8 py-3 border border-gold text-gold font-semibold uppercase tracking-wider text-sm transition-colors duration-200 hover:bg-gold hover:text-onyx focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gold;
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 sm:px-8 sm:py-3 border border-gold text-gold font-semibold uppercase tracking-wider text-xs sm:text-sm transition-colors duration-200 hover:bg-gold hover:text-onyx focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gold;
   }
 
   .card {
@@ -55,7 +55,7 @@
   }
 
   .input-field {
-    @apply w-full bg-graphite border border-iron rounded-sm px-4 py-3 text-cream placeholder:text-mist/60 focus:border-gold focus:outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply w-full bg-graphite border border-iron rounded-sm px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-cream placeholder:text-mist/60 focus:border-gold focus:outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
   }
 }
 

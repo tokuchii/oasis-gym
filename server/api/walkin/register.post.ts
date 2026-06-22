@@ -80,6 +80,6 @@ export default defineEventHandler(async (event) => {
   return {
     ...pass,
     qrPayload: pass.passCode,
-    message: 'Day pass registered. Show your QR code or pass code at the front desk.',
+    message: 'Walk-in account created. Your QR code is permanent — show it at every visit.',
   }
 })

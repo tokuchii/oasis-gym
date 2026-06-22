@@ -10,6 +10,7 @@ create table if not exists walkin_passes (
   emergency_contact text not null,
   visit_date        date not null default (timezone('Asia/Manila', now()))::date,
   status            text not null default 'registered' check (status in ('registered', 'checked_in', 'expired')),
+  payment_amount    numeric default 0,
   created_at        timestamptz not null default now(),
   checked_in_at     timestamptz,
   checked_in_by     text
@@ -20,3 +21,40 @@ create index if not exists walkin_passes_visit_date_status_idx on walkin_passes 
 create index if not exists walkin_passes_phone_visit_date_idx on walkin_passes (phone, visit_date);
 
 alter table walkin_passes enable row level security;
+
+-- Membership payments (weekly/monthly)
+create table if not exists membership_payments (
+  id                uuid primary key default gen_random_uuid(),
+  full_name         text not null,
+  email             text not null,
+  phone             text not null,
+  plan              text not null check (plan in ('weekly', 'monthly')),
+  coach             text,
+  payment_method    text not null,
+  reference_no      text,
+  amount            numeric not null,
+  receipt_url       text,
+  status            text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  created_at        timestamptz not null default now()
+);
+
+create index if not exists membership_payments_email_idx on membership_payments (email);
+create index if not exists membership_payments_status_idx on membership_payments (status);
+
+alter table membership_payments enable row level security;
+
+-- Coaches
+create table if not exists coaches (
+  id                uuid primary key default gen_random_uuid(),
+  full_name         text not null,
+  specialty         text,
+  bio               text,
+  photo_url         text,
+  display_order     int not null default 0,
+  active            boolean not null default true,
+  created_at        timestamptz not null default now()
+);
+
+create index if not exists coaches_active_idx on coaches (active, display_order);
+
+alter table coaches enable row level security;

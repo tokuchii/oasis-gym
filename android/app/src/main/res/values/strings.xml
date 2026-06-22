@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">OASIS FITNESS GYM</string>
+    <string name="title_activity_main">OASIS FITNESS GYM</string>
+    <string name="package_name">com.oasisfitnessgym.app</string>
+    <string name="custom_url_scheme">com.oasisfitnessgym.app</string>
+</resources>

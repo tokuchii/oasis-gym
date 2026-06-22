@@ -1,24 +1,42 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { WalkinPass } from '~/types/walkin'
+import type { WalkinPass, MembershipPayment, Coach } from '~/types/walkin'
 
-export type WalkinDatabase = {
+export type GymDatabase = {
   public: {
     Tables: {
       walkin_passes: {
         Row: WalkinPass
-        Insert: Omit<WalkinPass, 'id' | 'created_at' | 'checked_in_at' | 'checked_in_by'> & {
+        Insert: Omit<WalkinPass, 'id' | 'created_at' | 'checked_in_at' | 'checked_in_by' | 'payment_amount'> & {
           id?: string
           created_at?: string
           checked_in_at?: string | null
           checked_in_by?: string | null
+          payment_amount?: number | null
         }
         Update: Partial<WalkinPass>
+      }
+      membership_payments: {
+        Row: MembershipPayment
+        Insert: Omit<MembershipPayment, 'id' | 'created_at' | 'status'> & {
+          id?: string
+          created_at?: string
+          status?: string
+        }
+        Update: Partial<MembershipPayment>
+      }
+      coaches: {
+        Row: Coach
+        Insert: Omit<Coach, 'id' | 'created_at'> & {
+          id?: string
+          created_at?: string
+        }
+        Update: Partial<Coach>
       }
     }
   }
 }
 
-let client: SupabaseClient<WalkinDatabase> | null = null
+let client: SupabaseClient<GymDatabase> | null = null
 let clientUrl: string | null = null
 
 export function useSupabaseAdmin() {
@@ -35,7 +53,7 @@ export function useSupabaseAdmin() {
 
   if (client && clientUrl === url) return client
 
-  client = createClient<WalkinDatabase>(url, key, {
+  client = createClient<GymDatabase>(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
   clientUrl = url

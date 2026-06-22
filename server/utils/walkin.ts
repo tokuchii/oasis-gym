@@ -1,4 +1,4 @@
-import type { WalkinPass, WalkinPassStatus, WalkinRegisterPayload } from '~/types/walkin'
+import type { WalkinPass, WalkinPassStatus } from '~/types/walkin'
 
 const MANILA_TZ = 'Asia/Manila'
 
@@ -15,7 +15,7 @@ export function resolvePassStatus(pass: WalkinPass): WalkinPassStatus {
 
 const MAX_LENGTHS = { fullName: 100, email: 254, phone: 20, emergencyContact: 100 }
 
-export function validateWalkinPayload(body: unknown): WalkinRegisterPayload {
+export function validateWalkinPayload(body: unknown) {
   if (!body || typeof body !== 'object') {
     throw createError({ statusCode: 400, statusMessage: 'Invalid request body.' })
   }
@@ -55,6 +55,24 @@ export function validateWalkinPayload(body: unknown): WalkinRegisterPayload {
   }
 
   return { fullName, email, phone, emergencyContact }
+}
+
+export function validateCoachPayload(body: unknown) {
+  if (!body || typeof body !== 'object') {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid request body.' })
+  }
+
+  const data = body as Record<string, unknown>
+  const fullName = String(data.fullName ?? '').trim()
+  const specialty = String(data.specialty ?? '').trim()
+  const bio = String(data.bio ?? '').trim()
+  const photoUrl = String(data.photoUrl ?? '').trim()
+
+  if (!fullName) {
+    throw createError({ statusCode: 400, statusMessage: 'Full name is required.' })
+  }
+
+  return { fullName, specialty, bio, photoUrl }
 }
 
 export function serializePass(pass: WalkinPass) {

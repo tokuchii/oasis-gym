@@ -1,7 +1,7 @@
 import { requireStaff } from '~/server/utils/auth'
 import { normalizePassCode } from '~/server/utils/pass-code'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
-import { getVisitDateManila, serializePass } from '~/server/utils/walkin'
+import { serializePass } from '~/server/utils/walkin'
 
 function escapeLike(input: string): string {
   return input.replace(/[%_]/g, (c) => `\\${c}`)
@@ -31,9 +31,9 @@ export default defineEventHandler(async (event) => {
     }
     request = request.eq('pass_code', code)
   } else if (phone) {
-    request = request.ilike('phone', `%${escapeLike(phone)}%`).eq('visit_date', getVisitDateManila())
+    request = request.ilike('phone', `%${escapeLike(phone)}%`)
   } else {
-    request = request.ilike('full_name', `%${escapeLike(name)}%`).eq('visit_date', getVisitDateManila())
+    request = request.ilike('full_name', `%${escapeLike(name)}%`)
   }
 
   const { data, error } = await request.order('created_at', { ascending: false }).limit(10)
