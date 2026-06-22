@@ -43,6 +43,27 @@ create index if not exists membership_payments_status_idx on membership_payments
 
 alter table membership_payments enable row level security;
 
+-- Client sessions (tracking)
+create table if not exists client_sessions (
+  id                uuid primary key default gen_random_uuid(),
+  client_name       text not null,
+  client_email      text not null,
+  client_phone      text not null,
+  coach_name        text,
+  plan              text not null check (plan in ('weekly', 'monthly')),
+  total_sessions    int not null,
+  sessions_used     int not null default 0,
+  start_date        date not null default (timezone('Asia/Manila', now()))::date,
+  end_date          date not null,
+  status            text not null default 'active' check (status in ('active', 'completed', 'expired')),
+  created_at        timestamptz not null default now()
+);
+
+create index if not exists client_sessions_coach_idx on client_sessions (coach_name);
+create index if not exists client_sessions_status_idx on client_sessions (status);
+
+alter table client_sessions enable row level security;
+
 -- Coaches
 create table if not exists coaches (
   id                uuid primary key default gen_random_uuid(),

@@ -63,6 +63,26 @@ export interface CoachPayload {
   photoUrl: string
 }
 
+export interface ClientSession {
+  id: string
+  client_name: string
+  client_email: string
+  client_phone: string
+  coach_name: string | null
+  plan: 'weekly' | 'monthly'
+  total_sessions: number
+  sessions_used: number
+  start_date: string
+  end_date: string
+  status: 'active' | 'completed' | 'expired'
+  created_at: string
+}
+
+export const SESSION_LIMITS: Record<string, number> = {
+  weekly: 4,
+  monthly: 13,
+}
+
 export const MEMBERSHIP_PLANS = [
   {
     id: 'weekly',

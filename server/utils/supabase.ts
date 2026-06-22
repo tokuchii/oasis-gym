@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { WalkinPass, MembershipPayment, Coach } from '~/types/walkin'
+import type { WalkinPass, MembershipPayment, Coach, ClientSession } from '~/types/walkin'
 
 export type GymDatabase = {
   public: {
@@ -23,6 +23,15 @@ export type GymDatabase = {
           status?: string
         }
         Update: Partial<MembershipPayment>
+      }
+      client_sessions: {
+        Row: ClientSession
+        Insert: Omit<ClientSession, 'id' | 'created_at' | 'sessions_used'> & {
+          id?: string
+          created_at?: string
+          sessions_used?: number
+        }
+        Update: Partial<ClientSession>
       }
       coaches: {
         Row: Coach

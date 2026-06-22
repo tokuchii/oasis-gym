@@ -63,7 +63,7 @@ const loginPassword = ref('')
 const loginError = ref('')
 const loginSubmitting = ref(false)
 
-const activeTab = ref<'checkout' | 'walkin' | 'reports' | 'coaches'>('checkout')
+const activeTab = ref<'checkout' | 'walkin' | 'reports' | 'coaches' | 'management'>('checkout')
 
 const walkinForm = reactive({
   fullName: '',
@@ -129,6 +129,18 @@ function getSpecialtyString(): string {
   }
   return selected.join(', ')
 }
+
+const clientsList = ref<ClientSession[]>([])
+const clientLoading = ref(false)
+const clientError = ref('')
+const clientSuccess = ref('')
+const clientForm = reactive({
+  clientName: '',
+  clientEmail: '',
+  clientPhone: '',
+  coachName: '',
+  plan: '' as 'weekly' | 'monthly' | '',
+})
 
 const scannerRef = ref<HTMLElement | null>(null)
 let scanner: Html5Qrcode | null = null
@@ -480,6 +492,85 @@ async function deleteCoach(id: string, name: string) {
   }
 }
 
+async function loadClients() {
+  clientError.value = ''
+  try {
+    const data = await $fetch<{ clients: ClientSession[] }>('/api/clients/list')
+    clientsList.value = data.clients
+  } catch {
+    clientError.value = 'Failed to load clients.'
+  }
+}
+
+async function addClient() {
+  if (!clientForm.clientName.trim()) { clientError.value = 'Client name is required.'; return }
+  if (!clientForm.clientEmail.trim()) { clientError.value = 'Client email is required.'; return }
+  if (!clientForm.clientPhone.trim()) { clientError.value = 'Client phone is required.'; return }
+  if (!clientForm.plan) { clientError.value = 'Please select a plan.'; return }
+
+  clientError.value = ''
+  clientSuccess.value = ''
+  clientLoading.value = true
+
+  try {
+    const data = await $fetch<{ message: string }>('/api/clients/create', {
+      method: 'POST',
+      body: {
+        clientName: clientForm.clientName,
+        clientEmail: clientForm.clientEmail,
+        clientPhone: clientForm.clientPhone,
+        coachName: clientForm.coachName,
+        plan: clientForm.plan,
+      },
+    })
+    clientSuccess.value = data.message
+    clientForm.clientName = ''
+    clientForm.clientEmail = ''
+    clientForm.clientPhone = ''
+    clientForm.coachName = ''
+    clientForm.plan = ''
+    await loadClients()
+  } catch (err: unknown) {
+    const fetchErr = err as { data?: { statusMessage?: string } }
+    clientError.value = fetchErr.data?.statusMessage ?? 'Failed to add client.'
+  } finally {
+    clientLoading.value = false
+  }
+}
+
+async function toggleSession(clientId: string, action: 'add_session' | 'remove_session') {
+  clientError.value = ''
+  clientSuccess.value = ''
+
+  try {
+    const data = await $fetch<{ message: string }>('/api/clients/update', {
+      method: 'POST',
+      body: { id: clientId, action },
+    })
+    clientSuccess.value = data.message
+    await loadClients()
+  } catch (err: unknown) {
+    const fetchErr = err as { data?: { statusMessage?: string } }
+    clientError.value = fetchErr.data?.statusMessage ?? 'Failed to update session.'
+  }
+}
+
+async function deleteClient(id: string, name: string) {
+  if (!window.confirm(`Remove ${name} from clients?`)) return
+
+  clientError.value = ''
+  clientSuccess.value = ''
+
+  try {
+    await $fetch('/api/clients/delete', { method: 'POST', body: { id } })
+    clientSuccess.value = 'Client removed.'
+    await loadClients()
+  } catch (err: unknown) {
+    const fetchErr = err as { data?: { statusMessage?: string } }
+    clientError.value = fetchErr.data?.statusMessage ?? 'Failed to remove client.'
+  }
+}
+
 function statusLabel(status: string) {
   if (status === 'registered') return 'Registered'
   if (status === 'checked_in') return 'Checked out'
@@ -610,6 +701,14 @@ onUnmounted(() => {
             @click="activeTab = 'coaches'; loadCoaches()"
           >
             Coaches
+          </button>
+          <button
+            type="button"
+            class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
+            :class="activeTab === 'management' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
+            @click="activeTab = 'management'; loadClients()"
+          >
+            Management
           </button>
         </div>
 
@@ -1081,6 +1180,167 @@ onUnmounted(() => {
                 </div>
               </li>
             </ul>
+          </section>
+        </template>
+
+        <!-- MANAGEMENT TAB -->
+        <template v-if="activeTab === 'management'">
+          <!-- Add Client Form -->
+          <section class="card p-4 sm:p-6">
+            <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">Add Client</h2>
+            <form class="space-y-3 sm:space-y-4" @submit.prevent="addClient">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div>
+                  <label for="ci-name" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Client Name *</label>
+                  <input id="ci-name" v-model="clientForm.clientName" type="text" class="input-field" maxlength="100" placeholder="Full name" />
+                </div>
+                <div>
+                  <label for="ci-phone" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Phone *</label>
+                  <input id="ci-phone" v-model="clientForm.clientPhone" type="tel" class="input-field" maxlength="11" placeholder="09XXXXXXXXX" />
+                </div>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div>
+                  <label for="ci-email" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Email *</label>
+                  <input id="ci-email" v-model="clientForm.clientEmail" type="email" class="input-field" placeholder="client@email.com" />
+                </div>
+                <div>
+                  <label for="ci-coach" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Assigned Coach</label>
+                  <select id="ci-coach" v-model="clientForm.coachName" class="input-field">
+                    <option value="">No coach</option>
+                    <option v-for="c in coachesList" :key="c.id" :value="c.fullName">{{ c.fullName }}</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">Plan *</label>
+                <div class="flex gap-3 sm:gap-4">
+                  <label class="flex items-center gap-2 cursor-pointer p-2.5 sm:p-3 border border-iron hover:border-gold/50 transition-colors flex-1 text-center" :class="clientForm.plan === 'weekly' ? 'border-gold bg-gold/5' : ''">
+                    <input type="radio" v-model="clientForm.plan" value="weekly" class="accent-gold" />
+                    <div>
+                      <span class="text-cream text-[11px] sm:text-sm font-medium block">Weekly</span>
+                      <span class="text-mist text-[9px] sm:text-[10px]">4 sessions</span>
+                    </div>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer p-2.5 sm:p-3 border border-iron hover:border-gold/50 transition-colors flex-1 text-center" :class="clientForm.plan === 'monthly' ? 'border-gold bg-gold/5' : ''">
+                    <input type="radio" v-model="clientForm.plan" value="monthly" class="accent-gold" />
+                    <div>
+                      <span class="text-cream text-[11px] sm:text-sm font-medium block">Monthly</span>
+                      <span class="text-mist text-[9px] sm:text-[10px]">13 sessions</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <p v-if="clientError" class="text-red-400 text-xs sm:text-sm">{{ clientError }}</p>
+              <p v-if="clientSuccess" class="text-green-400 text-xs sm:text-sm">{{ clientSuccess }}</p>
+
+              <button type="submit" class="btn-primary w-full" :disabled="clientLoading">
+                {{ clientLoading ? 'Adding…' : 'Add Client' }}
+              </button>
+            </form>
+          </section>
+
+          <!-- Client Cards -->
+          <section class="card p-4 sm:p-6">
+            <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">
+              Active Clients <span class="text-mist text-xs font-body">({{ clientsList.filter(c => c.status === 'active').length }})</span>
+            </h2>
+
+            <div v-if="clientsList.length === 0" class="text-center py-6">
+              <p class="text-mist text-xs sm:text-sm">No clients yet. Add one above.</p>
+            </div>
+
+            <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div
+                v-for="client in clientsList"
+                :key="client.id"
+                class="border p-3 sm:p-4 transition-colors"
+                :class="client.status === 'active' ? 'border-iron hover:border-gold/50' : client.status === 'completed' ? 'border-green-400/30 bg-green-400/5' : 'border-red-400/30 bg-red-400/5'"
+              >
+                <!-- Client Details -->
+                <div class="flex items-start justify-between gap-2 mb-3">
+                  <div class="min-w-0">
+                    <p class="text-cream font-medium text-sm sm:text-base truncate">{{ client.client_name }}</p>
+                    <p class="text-mist text-[10px] sm:text-xs truncate">{{ client.client_email }}</p>
+                    <p class="text-mist text-[10px] sm:text-xs">{{ client.client_phone }}</p>
+                  </div>
+                  <span
+                    class="text-[9px] sm:text-[10px] uppercase tracking-wider px-1.5 sm:px-2 py-0.5 shrink-0"
+                    :class="client.status === 'active' ? 'text-gold border border-gold/30' : client.status === 'completed' ? 'text-green-400 border border-green-400/30' : 'text-red-400 border border-red-400/30'"
+                  >
+                    {{ client.status }}
+                  </span>
+                </div>
+
+                <!-- Plan + Coach -->
+                <div class="flex items-center gap-2 mb-3 text-[10px] sm:text-xs">
+                  <span class="text-gold font-medium uppercase">{{ client.plan }}</span>
+                  <span v-if="client.coach_name" class="text-mist">• {{ client.coach_name }}</span>
+                </div>
+
+                <!-- Session Progress -->
+                <div class="mb-3">
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-mist text-[10px] sm:text-xs">Sessions</span>
+                    <span class="text-cream text-[10px] sm:text-xs font-medium">{{ client.sessions_used }} / {{ client.total_sessions }}</span>
+                  </div>
+                  <div class="w-full bg-graphite h-2 sm:h-2.5 rounded-full overflow-hidden">
+                    <div
+                      class="h-full rounded-full transition-all duration-300"
+                      :class="client.sessions_used >= client.total_sessions ? 'bg-green-400' : 'bg-gold'"
+                      :style="{ width: `${(client.sessions_used / client.total_sessions) * 100}%` }"
+                    />
+                  </div>
+                </div>
+
+                <!-- Session Dots -->
+                <div class="flex flex-wrap gap-1 mb-3">
+                  <div
+                    v-for="s in client.total_sessions"
+                    :key="s"
+                    class="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center text-[9px] sm:text-[10px] font-medium border"
+                    :class="s <= client.sessions_used ? 'bg-gold text-onyx border-gold' : 'bg-graphite text-mist border-iron'"
+                  >
+                    {{ s }}
+                  </div>
+                </div>
+
+                <!-- Date Range -->
+                <div class="flex items-center justify-between text-[9px] sm:text-[10px] text-mist mb-3">
+                  <span>{{ client.start_date }}</span>
+                  <span>→</span>
+                  <span>{{ client.end_date }}</span>
+                </div>
+
+                <!-- Actions -->
+                <div class="flex gap-2">
+                  <button
+                    v-if="client.status === 'active' && client.sessions_used < client.total_sessions"
+                    type="button"
+                    class="btn-primary flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2"
+                    @click="toggleSession(client.id, 'add_session')"
+                  >
+                    + Mark Session Done
+                  </button>
+                  <button
+                    v-if="client.sessions_used > 0"
+                    type="button"
+                    class="btn-outline flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2"
+                    @click="toggleSession(client.id, 'remove_session')"
+                  >
+                    − Undo Session
+                  </button>
+                  <button
+                    type="button"
+                    class="text-red-400 hover:text-red-300 text-[10px] sm:text-xs uppercase tracking-wider px-2 transition-colors"
+                    @click="deleteClient(client.id, client.client_name)"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
           </section>
         </template>
       </div>
