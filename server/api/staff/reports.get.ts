@@ -1,6 +1,6 @@
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
-import { getVisitDateManila, serializePass } from '~/server/utils/walkin'
+import { getVisitDateManila } from '~/server/utils/walkin'
 
 export default defineEventHandler(async (event) => {
   requireStaff(event)
@@ -40,23 +40,34 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: passError.message })
   }
 
-  const serialized = (passes ?? []).map(serializePass)
+  const serialized = (passes ?? []).map((p) => ({
+    id: p.id,
+    passCode: p.pass_code,
+    fullName: p.full_name,
+    phone: p.phone,
+    email: p.email,
+    visitDate: p.visit_date,
+    status: p.status,
+    paymentAmount: p.payment_amount ?? 0,
+    createdAt: p.created_at,
+    checkedInAt: p.checked_in_at,
+  }))
 
   const totalVisits = serialized.length
-  const checkedIn = serialized.filter((p) => p.status === 'checked_in').length
+  const checkedOut = serialized.filter((p) => p.status === 'checked_in').length
   const totalRevenue = serialized
     .filter((p) => p.status === 'checked_in')
     .reduce((sum, p) => sum + (p.paymentAmount ?? 0), 0)
   const uniquePhones = new Set(serialized.map((p) => p.phone)).size
 
-  const dailyBreakdown: Record<string, { visits: number; checkedIn: number; revenue: number }> = {}
+  const dailyBreakdown: Record<string, { visits: number; checkedOut: number; revenue: number }> = {}
   for (const p of serialized) {
     if (!dailyBreakdown[p.visitDate]) {
-      dailyBreakdown[p.visitDate] = { visits: 0, checkedIn: 0, revenue: 0 }
+      dailyBreakdown[p.visitDate] = { visits: 0, checkedOut: 0, revenue: 0 }
     }
     dailyBreakdown[p.visitDate].visits++
     if (p.status === 'checked_in') {
-      dailyBreakdown[p.visitDate].checkedIn++
+      dailyBreakdown[p.visitDate].checkedOut++
       dailyBreakdown[p.visitDate].revenue += p.paymentAmount ?? 0
     }
   }
@@ -66,7 +77,7 @@ export default defineEventHandler(async (event) => {
     .map(([date, d]) => ({
       date,
       visits: d.visits,
-      checkedIn: d.checkedIn,
+      checkedOut: d.checkedOut,
       revenue: d.revenue,
     }))
 
@@ -74,7 +85,7 @@ export default defineEventHandler(async (event) => {
     visits: serialized,
     summary: {
       totalVisits,
-      checkedIn,
+      checkedOut,
       totalRevenue,
       uniqueMembers: uniquePhones,
       dateFrom,

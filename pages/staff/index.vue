@@ -40,7 +40,7 @@ interface ReportVisit {
 
 interface ReportSummary {
   totalVisits: number
-  checkedIn: number
+  checkedOut: number
   totalRevenue: number
   uniqueMembers: number
   dateFrom: string
@@ -51,7 +51,7 @@ interface ReportSummary {
 interface ChartPoint {
   date: string
   visits: number
-  checkedIn: number
+  checkedOut: number
   revenue: number
 }
 
@@ -396,7 +396,7 @@ async function deleteCoach(id: string, name: string) {
 
 function statusLabel(status: string) {
   if (status === 'registered') return 'Registered'
-  if (status === 'checked_in') return 'Checked in'
+  if (status === 'checked_in') return 'Checked out'
   return 'Expired'
 }
 
@@ -744,8 +744,8 @@ onUnmounted(() => {
                   <p class="font-display text-2xl sm:text-3xl text-gold">{{ reportData.summary.totalVisits }}</p>
                 </div>
                 <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
-                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Checked In</p>
-                  <p class="font-display text-2xl sm:text-3xl text-green-400">{{ reportData.summary.checkedIn }}</p>
+                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Checked Out</p>
+                  <p class="font-display text-2xl sm:text-3xl text-green-400">{{ reportData.summary.checkedOut }}</p>
                 </div>
                 <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
                   <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Revenue</p>
