@@ -760,71 +760,26 @@ onUnmounted(() => {
               <div v-if="reportData.chartData.length > 0" class="mb-4 sm:mb-6">
                 <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">Daily Breakdown</h3>
                 <div class="overflow-x-auto">
-                  <div class="relative min-h-[180px] sm:min-h-[220px] pb-6">
-                    <!-- Revenue line chart -->
-                    <svg class="w-full h-full" viewBox="0 0 700 200" preserveAspectRatio="none">
-                      <!-- Grid lines -->
-                      <line v-for="i in 4" :key="'grid-'+i" :x1="0" :y1="i * 45" :x2="700" :y2="i * 45" stroke="#2E2E2E" stroke-width="1" />
-
-                      <!-- Revenue line -->
-                      <polyline
-                        v-if="maxRevenue > 0"
-                        :points="reportData.chartData.map((p, i) => `${(i / Math.max(reportData.chartData.length - 1, 1)) * 680 + 10},${180 - (p.revenue / maxRevenue) * 160}`).join(' ')"
-                        fill="none"
-                        stroke="#C9A84C"
-                        stroke-width="2.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-
-                      <!-- Revenue dots -->
-                      <circle
-                        v-for="(point, i) in reportData.chartData"
-                        :key="'dot-'+i"
-                        :cx="(i / Math.max(reportData.chartData.length - 1, 1)) * 680 + 10"
-                        :cy="180 - (point.revenue / maxRevenue) * 160"
-                        r="4"
-                        fill="#C9A84C"
-                        :title="`${point.date}: ₱${point.revenue}`"
-                      />
-
-                      <!-- Visits bars -->
-                      <rect
-                        v-for="(point, i) in reportData.chartData"
-                        :key="'bar-'+i"
-                        :x="(i / Math.max(reportData.chartData.length - 1, 1)) * 680"
-                        :y="180 - (point.visits / maxVisits) * 160"
-                        :width="Math.max(680 / reportData.chartData.length - 4, 8)"
-                        :height="(point.visits / maxVisits) * 160"
-                        fill="#C9A84C33"
-                        rx="2"
-                        :title="`${point.date}: ${point.visits} visits`"
-                      />
-                    </svg>
-
-                    <!-- X-axis labels -->
-                    <div class="flex justify-between px-1 mt-1">
-                      <span
-                        v-for="point in reportData.chartData"
-                        :key="'label-'+point.date"
-                        class="text-[7px] sm:text-[9px] text-mist text-center"
-                        style="flex: 1;"
-                      >
-                        {{ point.date.slice(5) }}
-                      </span>
-                    </div>
-
-                    <!-- Legend -->
-                    <div class="flex items-center gap-4 mt-2 justify-center">
-                      <div class="flex items-center gap-1.5">
-                        <div class="w-3 h-3 bg-gold/30 rounded-sm" />
-                        <span class="text-[9px] sm:text-[10px] text-mist">Visits</span>
+                  <div class="flex items-end gap-1 sm:gap-2 min-h-[140px] sm:min-h-[180px] px-1">
+                    <div
+                      v-for="point in reportData.chartData"
+                      :key="point.date"
+                      class="flex-1 flex flex-col items-center gap-1 min-w-[32px]"
+                    >
+                      <div class="w-full flex flex-col items-center gap-0.5">
+                        <span class="text-[8px] sm:text-[9px] text-gold font-medium">₱{{ point.revenue }}</span>
+                        <div
+                          class="w-full bg-gold rounded-t transition-all"
+                          :style="{ height: `${Math.max((point.revenue / maxRevenue) * 100, 8)}%`, minHeight: '20px' }"
+                          :title="`${point.date}: ₱${point.revenue} revenue, ${point.checkedOut} checked out`"
+                        />
                       </div>
-                      <div class="flex items-center gap-1.5">
-                        <div class="w-3 h-0.5 bg-gold rounded" />
-                        <span class="text-[9px] sm:text-[10px] text-mist">Revenue</span>
-                      </div>
+                      <span class="text-[7px] sm:text-[9px] text-mist whitespace-nowrap">{{ point.date.slice(5) }}</span>
                     </div>
+                  </div>
+                  <div class="flex items-center gap-2 mt-2 justify-center">
+                    <div class="w-2.5 h-2.5 bg-gold rounded-sm" />
+                    <span class="text-[9px] sm:text-[10px] text-mist">Revenue per day (₱65/check-out)</span>
                   </div>
                 </div>
               </div>

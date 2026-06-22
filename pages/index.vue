@@ -644,7 +644,7 @@ onUnmounted(() => {
                 </div>
                 <div>
                   <label for="pay-phone" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Phone *</label>
-                  <input id="pay-phone" v-model="paymentForm.phone" type="tel" class="input-field" />
+                  <input id="pay-phone" v-model="paymentForm.phone" type="tel" class="input-field" maxlength="11" placeholder="09XXXXXXXXX" />
                   <p v-if="paymentErrors.phone" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.phone }}</p>
                 </div>
               </div>
@@ -693,7 +693,7 @@ onUnmounted(() => {
                 </div>
                 <div>
                   <label for="pay-amount" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Amount Paid *</label>
-                  <input id="pay-amount" v-model="paymentForm.amount" type="text" class="input-field" placeholder="₱" maxlength="10" />
+                  <input id="pay-amount" v-model="paymentForm.amount" type="text" class="input-field bg-graphite/50" placeholder="Select a plan first" readonly />
                   <p v-if="paymentErrors.amount" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.amount }}</p>
                 </div>
               </div>
