@@ -4,22 +4,14 @@ import { getVisitDateManila } from '~/server/utils/walkin'
 
 const WALKIN_FEE = 65
 
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-function formatLabel(date: string, period: string): string {
-  if (period === 'day') {
-    const d = new Date(date + 'T12:00:00')
-    return d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' })
-  }
-  if (period === 'week') {
-    const d = new Date(date + 'T12:00:00')
-    return DAY_NAMES[d.getDay()]
-  }
-  if (period === 'month') {
-    const day = parseInt(date.split('-')[2], 10)
-    return String(day)
-  }
-  return date.slice(5)
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(year, month + 1, 0).getDate()
+}
+
+function padZero(n: number): string {
+  return n < 10 ? `0${n}` : String(n)
 }
 
 export default defineEventHandler(async (event) => {
@@ -27,26 +19,27 @@ export default defineEventHandler(async (event) => {
 
   const query = getQuery(event)
   const period = String(query.period ?? 'day')
-  const startDate = String(query.startDate ?? '')
-  const endDate = String(query.endDate ?? '')
 
   const supabase = useSupabaseAdmin()
+  const now = new Date()
   const today = getVisitDateManila()
 
-  let dateFrom = startDate || today
-  let dateTo = endDate || today
+  let dateFrom = today
+  let dateTo = today
 
-  if (!startDate && !endDate) {
-    const now = new Date()
-    if (period === 'week') {
-      const dayOfWeek = now.getDay()
-      const monday = new Date(now)
-      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1))
-      dateFrom = getVisitDateManila(monday)
-    } else if (period === 'month') {
-      const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-      dateFrom = getVisitDateManila(firstOfMonth)
-    }
+  if (period === 'week') {
+    const dayOfWeek = now.getDay()
+    const monday = new Date(now)
+    monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1))
+    const sunday = new Date(monday)
+    sunday.setDate(monday.getDate() + 6)
+    dateFrom = getVisitDateManila(monday)
+    dateTo = getVisitDateManila(sunday)
+  } else if (period === 'month') {
+    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+    const lastOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+    dateFrom = getVisitDateManila(firstOfMonth)
+    dateTo = getVisitDateManila(lastOfMonth)
   }
 
   const { data: passes, error: passError } = await supabase
@@ -54,7 +47,7 @@ export default defineEventHandler(async (event) => {
     .select('*')
     .gte('visit_date', dateFrom)
     .lte('visit_date', dateTo)
-    .order('visit_date', { ascending: false })
+    .order('visit_date', { ascending: true })
 
   if (passError) {
     throw createError({ statusCode: 500, statusMessage: passError.message })
@@ -90,15 +83,52 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const chartData = Object.entries(dailyBreakdown)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, d]) => ({
-      date,
-      label: formatLabel(date, period),
-      visits: d.visits,
-      checkedOut: d.checkedOut,
-      revenue: d.revenue,
-    }))
+  let chartData: { date: string; label: string; visits: number; checkedOut: number; revenue: number }[] = []
+
+  if (period === 'day') {
+    const d = dailyBreakdown[today]
+    chartData = [{
+      date: today,
+      label: 'Today',
+      visits: d?.visits ?? 0,
+      checkedOut: d?.checkedOut ?? 0,
+      revenue: d?.revenue ?? 0,
+    }]
+  } else if (period === 'week') {
+    const dayOfWeek = now.getDay()
+    const mondayDate = new Date(now)
+    mondayDate.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1))
+
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(mondayDate)
+      d.setDate(mondayDate.getDate() + i)
+      const dateStr = getVisitDateManila(d)
+      const data = dailyBreakdown[dateStr]
+      chartData.push({
+        date: dateStr,
+        label: DAY_NAMES[i],
+        visits: data?.visits ?? 0,
+        checkedOut: data?.checkedOut ?? 0,
+        revenue: data?.revenue ?? 0,
+      })
+    }
+  } else if (period === 'month') {
+    const year = now.getFullYear()
+    const month = now.getMonth()
+    const daysInMonth = getDaysInMonth(year, month)
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${padZero(month + 1)}-${padZero(day)}`
+      const data = dailyBreakdown[dateStr]
+      chartData.push({
+        date: dateStr,
+        label: String(day),
+        visits: data?.visits ?? 0,
+        checkedOut: data?.checkedOut ?? 0,
+        revenue: data?.revenue ?? 0,
+      })
+    }
+  }
 
   return {
     visits: serialized,

@@ -89,8 +89,6 @@ const checkinError = ref('')
 const checkinPaymentAmount = ref(WALKIN_DEFAULT_FEE)
 
 const reportPeriod = ref<'day' | 'week' | 'month'>('day')
-const reportStartDate = ref('')
-const reportEndDate = ref('')
 const reportLoading = ref(false)
 const reportError = ref('')
 const reportData = ref<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[] } | null>(null)
@@ -340,11 +338,9 @@ async function loadReports() {
   reportData.value = null
 
   try {
-    const params: Record<string, string> = { period: reportPeriod.value }
-    if (reportStartDate.value) params.startDate = reportStartDate.value
-    if (reportEndDate.value) params.endDate = reportEndDate.value
-
-    const data = await $fetch<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[] }>('/api/staff/reports', { params })
+    const data = await $fetch<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[] }>('/api/staff/reports', {
+      params: { period: reportPeriod.value },
+    })
     reportData.value = data
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
@@ -806,60 +802,43 @@ onUnmounted(() => {
           <section class="card p-4 sm:p-6">
             <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">Reports & Analytics</h2>
 
-            <div class="flex flex-col gap-3 sm:gap-4 mb-4 sm:mb-6">
-              <div class="flex gap-1.5 sm:gap-2 flex-wrap">
-                <button
-                  type="button"
-                  class="px-2.5 sm:px-3 py-1 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
-                  :class="reportPeriod === 'day' && !reportStartDate ? 'border-gold text-gold' : 'border-iron text-mist'"
-                  @click="reportPeriod = 'day'; reportStartDate = ''; reportEndDate = ''; loadReports()"
-                >
-                  Today
-                </button>
-                <button
-                  type="button"
-                  class="px-2.5 sm:px-3 py-1 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
-                  :class="reportPeriod === 'week' && !reportStartDate ? 'border-gold text-gold' : 'border-iron text-mist'"
-                  @click="reportPeriod = 'week'; reportStartDate = ''; reportEndDate = ''; loadReports()"
-                >
-                  This Week
-                </button>
-                <button
-                  type="button"
-                  class="px-2.5 sm:px-3 py-1 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
-                  :class="reportPeriod === 'month' && !reportStartDate ? 'border-gold text-gold' : 'border-iron text-mist'"
-                  @click="reportPeriod = 'month'; reportStartDate = ''; reportEndDate = ''; loadReports()"
-                >
-                  This Month
-                </button>
-                <span class="text-mist text-[10px] sm:text-xs self-center">or</span>
-                <input v-model="reportStartDate" type="date" class="input-field text-[11px] sm:text-sm w-auto" placeholder="From" />
-                <input v-model="reportEndDate" type="date" class="input-field text-[11px] sm:text-sm w-auto" placeholder="To" />
-                <button
-                  v-if="reportStartDate"
-                  type="button"
-                  class="btn-primary shrink-0"
-                  :disabled="reportLoading"
-                  @click="loadReports()"
-                >
-                  {{ reportLoading ? 'Loading…' : 'Load' }}
-                </button>
-                <button v-if="reportData" type="button" class="btn-outline shrink-0" @click="exportReport">
-                  Export CSV
-                </button>
-              </div>
+            <div class="flex gap-1.5 sm:gap-2 mb-4 sm:mb-6 flex-wrap">
+              <button
+                type="button"
+                class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
+                :class="reportPeriod === 'day' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
+                @click="reportPeriod = 'day'; loadReports()"
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
+                :class="reportPeriod === 'week' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
+                @click="reportPeriod = 'week'; loadReports()"
+              >
+                This Week
+              </button>
+              <button
+                type="button"
+                class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
+                :class="reportPeriod === 'month' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
+                @click="reportPeriod = 'month'; loadReports()"
+              >
+                This Month
+              </button>
+              <button v-if="reportData" type="button" class="btn-outline px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs" @click="exportReport">
+                Export CSV
+              </button>
             </div>
 
             <p v-if="reportError" class="text-red-400 text-xs sm:text-sm mb-3 sm:mb-4">{{ reportError }}</p>
 
-            <!-- Loading state -->
             <div v-if="reportLoading" class="text-center py-10">
               <p class="text-mist text-xs sm:text-sm">Loading report…</p>
             </div>
 
-            <!-- Results -->
             <template v-else-if="reportData">
-              <!-- Summary cards -->
               <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
                 <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
                   <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Total Visits</p>
@@ -879,44 +858,37 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Date range label -->
               <p class="text-mist text-[10px] sm:text-xs mb-3 sm:mb-4">
-                Showing data from <span class="text-cream">{{ reportData.summary.dateFrom }}</span> to <span class="text-cream">{{ reportData.summary.dateTo }}</span>
+                {{ reportPeriod === 'day' ? 'Today' : reportPeriod === 'week' ? 'This Week' : 'This Month' }}: <span class="text-cream">{{ reportData.summary.dateFrom }}</span> to <span class="text-cream">{{ reportData.summary.dateTo }}</span>
               </p>
 
-              <!-- Chart -->
-              <div v-if="reportData.chartData.length > 0" class="mb-4 sm:mb-6">
+              <div v-if="reportData.chartData.length > 0 && reportData.chartData.some(p => p.visits > 0)" class="mb-4 sm:mb-6">
                 <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">
-                  {{ reportPeriod === 'day' ? 'Today\'s Breakdown' : reportPeriod === 'week' ? 'This Week\'s Breakdown' : 'This Month\'s Breakdown' }}
+                  {{ reportPeriod === 'day' ? 'Today' : reportPeriod === 'week' ? 'This Week' : 'This Month' }} — Revenue
                 </h3>
                 <div class="overflow-x-auto">
-                  <div class="flex items-end gap-2 sm:gap-3 min-h-[160px] sm:min-h-[200px] px-2 pb-8 relative">
+                  <div class="flex items-end gap-1 sm:gap-1.5 min-h-[160px] sm:min-h-[200px] px-2 pb-8">
                     <div
                       v-for="point in reportData.chartData"
                       :key="point.date"
-                      class="flex-1 flex flex-col items-center gap-1 min-w-[40px] sm:min-w-[50px]"
+                      class="flex-1 flex flex-col items-center gap-1 min-w-[28px] sm:min-w-[36px]"
                     >
-                      <span class="text-[9px] sm:text-[11px] text-gold font-semibold">₱{{ point.revenue }}</span>
+                      <span v-if="point.revenue > 0" class="text-[8px] sm:text-[10px] text-gold font-semibold">₱{{ point.revenue }}</span>
                       <div
-                        class="w-full bg-gold rounded-t transition-all"
-                        :style="{ height: `${Math.max((point.revenue / maxRevenue) * 100, 10)}%`, minHeight: '24px' }"
-                        :title="`${point.label}: ₱${point.revenue}`"
+                        class="w-full rounded-t transition-all"
+                        :class="point.revenue > 0 ? 'bg-gold' : 'bg-iron/30'"
+                        :style="{ height: point.revenue > 0 ? `${Math.max((point.revenue / maxRevenue) * 100, 12)}%` : '4px' }"
                       />
-                      <span class="text-[10px] sm:text-xs text-cream font-medium mt-1">{{ point.label }}</span>
+                      <span class="text-[8px] sm:text-[10px] text-mist font-medium">{{ point.label }}</span>
                     </div>
                   </div>
                   <div class="flex items-center gap-2 mt-1 justify-center">
                     <div class="w-3 h-3 bg-gold rounded-sm" />
-                    <span class="text-[10px] sm:text-xs text-mist">Revenue (₱65/check-out)</span>
+                    <span class="text-[9px] sm:text-[10px] text-mist">Revenue (₱65/check-out)</span>
                   </div>
                 </div>
               </div>
 
-              <div v-else class="text-center py-6 mb-4 sm:mb-6">
-                <p class="text-mist text-xs sm:text-sm">No chart data for this period.</p>
-              </div>
-
-              <!-- Visit log -->
               <div v-if="reportData.visits.length > 0">
                 <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">Visit Log</h3>
                 <div class="overflow-x-auto">
@@ -950,9 +922,8 @@ onUnmounted(() => {
               </div>
             </template>
 
-            <!-- No data loaded yet -->
             <div v-else class="text-center py-10">
-              <p class="text-mist text-xs sm:text-sm">Select a period and click Load to view the report.</p>
+              <p class="text-mist text-xs sm:text-sm">Select a period above to view the report.</p>
             </div>
           </section>
         </template>
