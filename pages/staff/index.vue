@@ -134,6 +134,13 @@ const clientsList = ref<ClientSession[]>([])
 const clientLoading = ref(false)
 const clientError = ref('')
 const clientSuccess = ref('')
+const clientCoachFilter = ref('')
+
+const filteredClients = computed(() => {
+  if (!clientCoachFilter.value) return clientsList.value
+  return clientsList.value.filter((c) => c.coach_name === clientCoachFilter.value)
+})
+
 const clientForm = reactive({
   clientName: '',
   clientEmail: '',
@@ -540,14 +547,12 @@ async function addClient() {
 
 async function toggleSession(clientId: string, action: 'add_session' | 'remove_session') {
   clientError.value = ''
-  clientSuccess.value = ''
 
   try {
-    const data = await $fetch<{ message: string }>('/api/clients/update', {
+    await $fetch('/api/clients/update', {
       method: 'POST',
       body: { id: clientId, action },
     })
-    clientSuccess.value = data.message
     await loadClients()
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
@@ -1243,17 +1248,43 @@ onUnmounted(() => {
 
           <!-- Client Cards -->
           <section class="card p-4 sm:p-6">
-            <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">
-              Active Clients <span class="text-mist text-xs font-body">({{ clientsList.filter(c => c.status === 'active').length }})</span>
-            </h2>
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+              <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide">
+                Clients <span class="text-mist text-xs font-body">({{ filteredClients.length }})</span>
+              </h2>
+              <div class="flex gap-1.5 sm:gap-2 flex-wrap">
+                <button
+                  type="button"
+                  class="px-2 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                  :class="clientCoachFilter === '' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
+                  @click="clientCoachFilter = ''"
+                >
+                  All
+                </button>
+                <button
+                  v-for="coach in coachesList"
+                  :key="coach.id"
+                  type="button"
+                  class="px-2 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                  :class="clientCoachFilter === coach.fullName ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
+                  @click="clientCoachFilter = coach.fullName"
+                >
+                  {{ coach.fullName }}
+                </button>
+              </div>
+            </div>
 
             <div v-if="clientsList.length === 0" class="text-center py-6">
               <p class="text-mist text-xs sm:text-sm">No clients yet. Add one above.</p>
             </div>
 
+            <div v-else-if="filteredClients.length === 0" class="text-center py-6">
+              <p class="text-mist text-xs sm:text-sm">No clients for this coach.</p>
+            </div>
+
             <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div
-                v-for="client in clientsList"
+                v-for="client in filteredClients"
                 :key="client.id"
                 class="border p-3 sm:p-4 transition-colors"
                 :class="client.status === 'active' ? 'border-iron hover:border-gold/50' : client.status === 'completed' ? 'border-green-400/30 bg-green-400/5' : 'border-red-400/30 bg-red-400/5'"
