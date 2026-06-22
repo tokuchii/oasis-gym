@@ -7,10 +7,6 @@ const WALKIN_FEE = 65
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-function getDaysInMonth(year: number, month: number): number {
-  return new Date(year, month + 1, 0).getDate()
-}
-
 function padZero(n: number): string {
   return n < 10 ? `0${n}` : String(n)
 }
@@ -37,10 +33,10 @@ export default defineEventHandler(async (event) => {
     dateFrom = getVisitDateManila(monday)
     dateTo = getVisitDateManila(sunday)
   } else if (period === 'month') {
-    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-    const lastOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-    dateFrom = getVisitDateManila(firstOfMonth)
-    dateTo = getVisitDateManila(lastOfMonth)
+    const firstOfYear = new Date(now.getFullYear(), 0, 1)
+    const lastOfYear = new Date(now.getFullYear(), 11, 31)
+    dateFrom = getVisitDateManila(firstOfYear)
+    dateTo = getVisitDateManila(lastOfYear)
   }
 
   const { data: passes, error: passError } = await supabase
@@ -115,18 +111,31 @@ export default defineEventHandler(async (event) => {
     }
   } else if (period === 'month') {
     const year = now.getFullYear()
-    const month = now.getMonth()
-    const daysInMonth = getDaysInMonth(year, month)
+    const currentMonth = now.getMonth()
 
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dateStr = `${year}-${padZero(month + 1)}-${padZero(day)}`
-      const data = dailyBreakdown[dateStr]
+    for (let m = 0; m < 12; m++) {
+      const monthStart = `${year}-${padZero(m + 1)}-01`
+      const lastDay = new Date(year, m + 1, 0).getDate()
+      const monthEnd = `${year}-${padZero(m + 1)}-${padZero(lastDay)}`
+
+      let monthVisits = 0
+      let monthCheckedOut = 0
+      let monthRevenue = 0
+
+      for (const [dateStr, data] of Object.entries(dailyBreakdown)) {
+        if (dateStr >= monthStart && dateStr <= monthEnd) {
+          monthVisits += data.visits
+          monthCheckedOut += data.checkedOut
+          monthRevenue += data.revenue
+        }
+      }
+
       chartData.push({
-        date: dateStr,
-        label: String(day),
-        visits: data?.visits ?? 0,
-        checkedOut: data?.checkedOut ?? 0,
-        revenue: data?.revenue ?? 0,
+        date: monthStart,
+        label: MONTH_NAMES[m],
+        visits: monthVisits,
+        checkedOut: monthCheckedOut,
+        revenue: monthRevenue,
       })
     }
   }
