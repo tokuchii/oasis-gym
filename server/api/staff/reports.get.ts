@@ -4,6 +4,24 @@ import { getVisitDateManila } from '~/server/utils/walkin'
 
 const WALKIN_FEE = 65
 
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function formatLabel(date: string, period: string): string {
+  if (period === 'day') {
+    const d = new Date(date + 'T12:00:00')
+    return d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' })
+  }
+  if (period === 'week') {
+    const d = new Date(date + 'T12:00:00')
+    return DAY_NAMES[d.getDay()]
+  }
+  if (period === 'month') {
+    const day = parseInt(date.split('-')[2], 10)
+    return String(day)
+  }
+  return date.slice(5)
+}
+
 export default defineEventHandler(async (event) => {
   requireStaff(event)
 
@@ -76,6 +94,7 @@ export default defineEventHandler(async (event) => {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, d]) => ({
       date,
+      label: formatLabel(date, period),
       visits: d.visits,
       checkedOut: d.checkedOut,
       revenue: d.revenue,

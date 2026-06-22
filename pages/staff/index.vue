@@ -50,6 +50,7 @@ interface ReportSummary {
 
 interface ChartPoint {
   date: string
+  label: string
   visits: number
   checkedOut: number
   revenue: number
@@ -115,7 +116,17 @@ const specialtyOptions = [
   'Boxing & MMA',
   'Rehabilitation',
   'Sports Performance',
+  'Other',
 ]
+const customSpecialty = ref('')
+
+function getSpecialtyString(): string {
+  const selected = coachForm.specialty.filter((s) => s !== 'Other')
+  if (coachForm.specialty.includes('Other') && customSpecialty.value.trim()) {
+    selected.push(customSpecialty.value.trim())
+  }
+  return selected.join(', ')
+}
 
 const scannerRef = ref<HTMLElement | null>(null)
 let scanner: Html5Qrcode | null = null
@@ -358,13 +369,19 @@ function resetCoachForm() {
   coachForm.specialty = []
   coachForm.bio = ''
   coachForm.photoUrl = ''
+  customSpecialty.value = ''
   editingCoach.value = null
 }
 
 function startEditCoach(coach: CoachItem) {
   editingCoach.value = coach
   coachForm.fullName = coach.fullName
-  coachForm.specialty = coach.specialty ? coach.specialty.split(', ').filter(Boolean) : []
+  const specialties = coach.specialty ? coach.specialty.split(', ').filter(Boolean) : []
+  const known = specialtyOptions.filter((o) => o !== 'Other')
+  coachForm.specialty = specialties.filter((s) => known.includes(s))
+  const customParts = specialties.filter((s) => !known.includes(s))
+  customSpecialty.value = customParts.join(', ')
+  if (customParts.length > 0) coachForm.specialty.push('Other')
   coachForm.bio = coach.bio ?? ''
   coachForm.photoUrl = coach.photoUrl ?? ''
   coachError.value = ''
@@ -386,7 +403,7 @@ async function addCoach() {
       method: 'POST',
       body: {
         fullName: coachForm.fullName,
-        specialty: coachForm.specialty.join(', '),
+        specialty: getSpecialtyString(),
         bio: coachForm.bio,
         photoUrl: coachForm.photoUrl,
       },
@@ -419,7 +436,7 @@ async function updateCoach() {
       body: {
         id: editingCoach.value.id,
         fullName: coachForm.fullName,
-        specialty: coachForm.specialty.join(', '),
+        specialty: getSpecialtyString(),
         bio: coachForm.bio,
         photoUrl: coachForm.photoUrl,
       },
@@ -818,7 +835,9 @@ onUnmounted(() => {
               </div>
 
               <div v-if="reportData.chartData.length > 0" class="mb-4 sm:mb-6">
-                <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">Daily Breakdown</h3>
+                <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">
+                  {{ reportPeriod === 'day' ? 'Hourly Breakdown' : reportPeriod === 'week' ? 'Weekly Breakdown' : 'Monthly Breakdown' }}
+                </h3>
                 <div class="overflow-x-auto">
                   <div class="flex items-end gap-1 sm:gap-2 min-h-[140px] sm:min-h-[180px] px-1">
                     <div
@@ -831,15 +850,15 @@ onUnmounted(() => {
                         <div
                           class="w-full bg-gold rounded-t transition-all"
                           :style="{ height: `${Math.max((point.revenue / maxRevenue) * 100, 8)}%`, minHeight: '20px' }"
-                          :title="`${point.date}: ₱${point.revenue} revenue, ${point.checkedOut} checked out`"
+                          :title="`${point.label}: ₱${point.revenue} revenue, ${point.checkedOut} checked out`"
                         />
                       </div>
-                      <span class="text-[7px] sm:text-[9px] text-mist whitespace-nowrap">{{ point.date.slice(5) }}</span>
+                      <span class="text-[7px] sm:text-[9px] text-mist whitespace-nowrap">{{ point.label }}</span>
                     </div>
                   </div>
                   <div class="flex items-center gap-2 mt-2 justify-center">
                     <div class="w-2.5 h-2.5 bg-gold rounded-sm" />
-                    <span class="text-[9px] sm:text-[10px] text-mist">Revenue per day (₱65/check-out)</span>
+                    <span class="text-[9px] sm:text-[10px] text-mist">Revenue (₱65/check-out)</span>
                   </div>
                 </div>
               </div>
@@ -906,6 +925,15 @@ onUnmounted(() => {
                     />
                     <span class="text-[10px] sm:text-xs text-cream">{{ opt }}</span>
                   </label>
+                </div>
+                <div v-if="coachForm.specialty.includes('Other')" class="mt-2">
+                  <input
+                    v-model="customSpecialty"
+                    type="text"
+                    class="input-field"
+                    maxlength="100"
+                    placeholder="Type your specialty"
+                  />
                 </div>
               </div>
               <div>
