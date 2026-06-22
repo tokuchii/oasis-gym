@@ -5,6 +5,7 @@ import { getVisitDateManila } from '~/server/utils/walkin'
 const WALKIN_FEE = 65
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 function getDaysInMonth(year: number, month: number): number {
   return new Date(year, month + 1, 0).getDate()
@@ -116,13 +117,14 @@ export default defineEventHandler(async (event) => {
     const year = now.getFullYear()
     const month = now.getMonth()
     const daysInMonth = getDaysInMonth(year, month)
+    const monthLabel = MONTH_NAMES[month]
 
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = `${year}-${padZero(month + 1)}-${padZero(day)}`
       const data = dailyBreakdown[dateStr]
       chartData.push({
         date: dateStr,
-        label: String(day),
+        label: `${monthLabel} ${day}`,
         visits: data?.visits ?? 0,
         checkedOut: data?.checkedOut ?? 0,
         revenue: data?.revenue ?? 0,

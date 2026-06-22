@@ -23,6 +23,8 @@ export default defineEventHandler(async (event) => {
     .from('walkin_passes')
     .select('*')
     .eq('pass_code', passCode)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle()
 
   if (error) {
@@ -30,21 +32,17 @@ export default defineEventHandler(async (event) => {
   }
 
   if (!data) {
-    throw createError({ statusCode: 404, statusMessage: 'Pass not found.' })
+    throw createError({ statusCode: 404, statusMessage: 'Pass not found. This QR code is not registered.' })
   }
 
   const today = getVisitDateManila()
 
   if (data.visit_date < today) {
-    throw createError({ statusCode: 410, statusMessage: 'This pass has expired.' })
+    throw createError({ statusCode: 410, statusMessage: 'This pass has expired. Register a new walk-in for today.' })
   }
 
   if (data.status === 'checked_in') {
-    throw createError({ statusCode: 409, statusMessage: 'This pass has already been checked in.' })
-  }
-
-  if (data.status !== 'registered') {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid pass status.' })
+    throw createError({ statusCode: 409, statusMessage: 'This pass was already checked out today.' })
   }
 
   const { data: updated, error: updateError } = await supabase
@@ -56,19 +54,19 @@ export default defineEventHandler(async (event) => {
       checked_in_by: 'staff',
     })
     .eq('pass_code', passCode)
-    .eq('status', 'registered')
+    .eq('visit_date', today)
     .select('*')
     .single()
 
   if (updateError || !updated) {
     throw createError({
-      statusCode: 409,
-      statusMessage: 'Pass could not be checked in. It may already be used.',
+      statusCode: 500,
+      statusMessage: `Failed to check out. ${updateError?.message ?? 'Unknown error'}`,
     })
   }
 
   return {
     pass: serializePass(updated),
-    message: 'Guest checked in successfully.',
+    message: 'Guest checked out successfully.',
   }
 })
