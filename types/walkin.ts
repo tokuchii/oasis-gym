@@ -42,6 +42,8 @@ export interface MembershipPayment {
   amount: number
   receipt_url: string | null
   status: 'pending' | 'approved' | 'rejected'
+  expiry_date: string | null
+  reminder_sent: boolean
   created_at: string
 }
 

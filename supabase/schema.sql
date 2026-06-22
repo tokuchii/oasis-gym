@@ -35,11 +35,14 @@ create table if not exists membership_payments (
   amount            numeric not null,
   receipt_url       text,
   status            text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  expiry_date       date,
+  reminder_sent     boolean not null default false,
   created_at        timestamptz not null default now()
 );
 
 create index if not exists membership_payments_email_idx on membership_payments (email);
 create index if not exists membership_payments_status_idx on membership_payments (status);
+create index if not exists membership_payments_expiry_idx on membership_payments (expiry_date, status, reminder_sent);
 
 alter table membership_payments enable row level security;
 

@@ -96,6 +96,28 @@ const reportLoading = ref(false)
 const reportError = ref('')
 const reportData = ref<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[] } | null>(null)
 
+const reminderLoading = ref(false)
+const reminderMessage = ref('')
+const reminderError = ref('')
+
+async function sendReminders() {
+  reminderLoading.value = true
+  reminderMessage.value = ''
+  reminderError.value = ''
+
+  try {
+    const data = await $fetch<{ message: string; sent: number; failed: number }>('/api/membership/send-reinders', {
+      method: 'POST',
+    })
+    reminderMessage.value = data.message
+  } catch (err: unknown) {
+    const fetchErr = err as { data?: { statusMessage?: string } }
+    reminderError.value = fetchErr.data?.statusMessage ?? 'Failed to send reminders.'
+  } finally {
+    reminderLoading.value = false
+  }
+}
+
 const coachesList = ref<CoachItem[]>([])
 const coachLoading = ref(false)
 const coachError = ref('')
@@ -946,6 +968,26 @@ onUnmounted(() => {
 
         <!-- REPORTS TAB -->
         <template v-if="activeTab === 'reports'">
+          <!-- Renewal Reminders -->
+          <section class="card p-4 sm:p-6 mb-4 sm:mb-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide">Membership Renewals</h2>
+                <p class="text-mist text-[10px] sm:text-xs mt-0.5">Send renewal reminders to members expiring within 3 days.</p>
+              </div>
+              <button
+                type="button"
+                class="btn-primary text-[10px] sm:text-xs px-3 sm:px-4 py-1.5 sm:py-2 shrink-0"
+                :disabled="reminderLoading"
+                @click="sendReminders()"
+              >
+                {{ reminderLoading ? 'Sending…' : 'Send Reminders' }}
+              </button>
+            </div>
+            <p v-if="reminderMessage" class="text-green-400 text-xs sm:text-sm mt-3">{{ reminderMessage }}</p>
+            <p v-if="reminderError" class="text-red-400 text-xs sm:text-sm mt-3">{{ reminderError }}</p>
+          </section>
+
           <section class="card p-4 sm:p-6">
             <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">Reports & Analytics</h2>
 

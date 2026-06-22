@@ -35,6 +35,15 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Valid payment amount is required.' })
   }
 
+  const now = new Date()
+  const expiryDate = new Date(now)
+  if (planRaw === 'weekly') {
+    expiryDate.setDate(expiryDate.getDate() + 7)
+  } else {
+    expiryDate.setMonth(expiryDate.getMonth() + 1)
+  }
+  const expiryDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(expiryDate)
+
   const supabase = useSupabaseAdmin()
 
   const { data, error } = await supabase
@@ -48,6 +57,8 @@ export default defineEventHandler(async (event) => {
       payment_method: paymentMethod,
       reference_no: referenceNo,
       amount,
+      expiry_date: expiryDateStr,
+      reminder_sent: false,
     })
     .select('*')
     .single()
