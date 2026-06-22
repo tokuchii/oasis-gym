@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Html5Qrcode } from 'html5-qrcode'
 import { WALKIN_DEFAULT_FEE } from '~/types/walkin'
+import { generateWalkinQrDataUrl } from '~/composables/useWalkinPass'
 
 useHead({ title: 'Staff Dashboard — OASIS FITNESS GYM' })
 
@@ -73,6 +74,8 @@ const walkinForm = reactive({
 const walkinSubmitting = ref(false)
 const walkinMessage = ref('')
 const walkinError = ref('')
+const walkinPassCode = ref('')
+const walkinQrDataUrl = ref('')
 
 const scannerActive = ref(false)
 
@@ -205,6 +208,8 @@ function stopScanner() {
 async function submitWalkin() {
   walkinMessage.value = ''
   walkinError.value = ''
+  walkinPassCode.value = ''
+  walkinQrDataUrl.value = ''
 
   if (!walkinForm.fullName.trim()) { walkinError.value = 'Full name is required.'; return }
   if (!walkinForm.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(walkinForm.email)) { walkinError.value = 'Valid email is required.'; return }
@@ -214,7 +219,7 @@ async function submitWalkin() {
 
   walkinSubmitting.value = true
   try {
-    const data = await $fetch<{ passCode: string; message: string }>('/api/walkin/register', {
+    const data = await $fetch<{ passCode: string; qrPayload: string; message: string }>('/api/walkin/register', {
       method: 'POST',
       body: {
         fullName: walkinForm.fullName,
@@ -223,7 +228,13 @@ async function submitWalkin() {
         emergencyContact: walkinForm.emergencyContact,
       },
     })
-    walkinMessage.value = `${data.message} Pass code: ${data.passCode}`
+    walkinPassCode.value = data.passCode
+    try {
+      walkinQrDataUrl.value = await generateWalkinQrDataUrl(data.qrPayload)
+    } catch {
+      walkinQrDataUrl.value = ''
+    }
+    walkinMessage.value = data.message
     walkinForm.fullName = ''
     walkinForm.email = ''
     walkinForm.phone = ''
@@ -769,33 +780,60 @@ onUnmounted(() => {
             <p class="text-mist text-[11px] sm:text-sm mb-3 sm:mb-6">
               Register a new walk-in guest. They will receive a permanent QR code for future visits.
             </p>
-            <form class="space-y-3 sm:space-y-4" @submit.prevent="submitWalkin">
-              <div>
-                <label for="wi-name" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Full Name *</label>
-                <input id="wi-name" v-model="walkinForm.fullName" type="text" class="input-field" maxlength="100" placeholder="Guest name" />
-              </div>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+
+            <template v-if="!walkinPassCode">
+              <form class="space-y-3 sm:space-y-4" @submit.prevent="submitWalkin">
                 <div>
-                  <label for="wi-email" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Email *</label>
-                  <input id="wi-email" v-model="walkinForm.email" type="email" class="input-field" placeholder="guest@email.com" />
+                  <label for="wi-name" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Full Name *</label>
+                  <input id="wi-name" v-model="walkinForm.fullName" type="text" class="input-field" maxlength="100" placeholder="Guest name" />
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                  <div>
+                    <label for="wi-email" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Email *</label>
+                    <input id="wi-email" v-model="walkinForm.email" type="email" class="input-field" placeholder="guest@email.com" />
+                  </div>
+                  <div>
+                    <label for="wi-phone" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Phone *</label>
+                    <input id="wi-phone" v-model="walkinForm.phone" type="tel" class="input-field" maxlength="11" placeholder="09XXXXXXXXX" />
+                  </div>
                 </div>
                 <div>
-                  <label for="wi-phone" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Phone *</label>
-                  <input id="wi-phone" v-model="walkinForm.phone" type="tel" class="input-field" maxlength="13" placeholder="09XXXXXXXXX" />
+                  <label for="wi-emergency" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Emergency Contact *</label>
+                  <input id="wi-emergency" v-model="walkinForm.emergencyContact" type="text" class="input-field" maxlength="100" placeholder="Name & phone number" />
                 </div>
-              </div>
-              <div>
-                <label for="wi-emergency" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Emergency Contact *</label>
-                <input id="wi-emergency" v-model="walkinForm.emergencyContact" type="text" class="input-field" maxlength="100" placeholder="Name & phone number" />
-              </div>
 
-              <p v-if="walkinError" class="text-red-400 text-xs sm:text-sm">{{ walkinError }}</p>
-              <p v-if="walkinMessage" class="text-green-400 text-xs sm:text-sm">{{ walkinMessage }}</p>
+                <p v-if="walkinError" class="text-red-400 text-xs sm:text-sm">{{ walkinError }}</p>
 
-              <button type="submit" class="btn-primary w-full" :disabled="walkinSubmitting">
-                {{ walkinSubmitting ? 'Registering…' : 'Register Walk-in' }}
-              </button>
-            </form>
+                <button type="submit" class="btn-primary w-full" :disabled="walkinSubmitting">
+                  {{ walkinSubmitting ? 'Registering…' : 'Register Walk-in' }}
+                </button>
+              </form>
+            </template>
+
+            <!-- Success + QR Code -->
+            <template v-else>
+              <div class="text-center space-y-3 sm:space-y-4">
+                <div class="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 border border-green-400/30 rounded-full">
+                  <span class="text-green-400 text-lg sm:text-2xl">✓</span>
+                </div>
+                <p class="text-green-400 text-xs sm:text-sm">{{ walkinMessage }}</p>
+
+                <div v-if="walkinQrDataUrl" class="inline-block p-2.5 sm:p-4 bg-cream rounded-sm">
+                  <img :src="walkinQrDataUrl" alt="Walk-in QR code" class="w-40 h-40 sm:w-52 sm:h-52" />
+                </div>
+
+                <div>
+                  <p class="text-mist text-[9px] sm:text-xs uppercase tracking-wider mb-0.5 sm:mb-1">Pass Code</p>
+                  <p class="font-display text-xl sm:text-3xl text-gold tracking-widest">{{ walkinPassCode }}</p>
+                </div>
+
+                <p class="text-mist text-[9px] sm:text-xs">Show this QR code to the guest. It works for every future visit.</p>
+
+                <button type="button" class="btn-outline w-full" @click="walkinPassCode = ''; walkinQrDataUrl = ''; walkinMessage = ''">
+                  Register Another
+                </button>
+              </div>
+            </template>
           </section>
         </template>
 
@@ -829,7 +867,7 @@ onUnmounted(() => {
               >
                 This Month
               </button>
-              <button v-if="reportData" type="button" class="btn-outline px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs" @click="exportReport">
+              <button v-if="reportData" type="button" class="btn-outline px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs ml-auto" @click="exportReport">
                 Export CSV
               </button>
             </div>
@@ -956,7 +994,7 @@ onUnmounted(() => {
               </div>
               <div>
                 <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">Specialty</label>
-                <div class="grid grid-cols-2 gap-1.5 sm:gap-2">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2">
                   <label
                     v-for="opt in specialtyOptions"
                     :key="opt"
@@ -1054,8 +1092,18 @@ onUnmounted(() => {
 #qr-reader video {
   border-radius: 2px;
   width: 100%;
+  max-width: 100%;
 }
 #qr-reader__scan_region {
   min-height: 200px;
+}
+#qr-reader {
+  width: 100%;
+  overflow: hidden;
+}
+@media (max-width: 380px) {
+  .font-display {
+    letter-spacing: 0.05em;
+  }
 }
 </style>
