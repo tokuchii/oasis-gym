@@ -806,40 +806,43 @@ onUnmounted(() => {
           <section class="card p-4 sm:p-6">
             <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">Reports & Analytics</h2>
 
-            <div class="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-4 sm:mb-6">
-              <div class="flex gap-1.5 sm:gap-2">
+            <div class="flex flex-col gap-3 sm:gap-4 mb-4 sm:mb-6">
+              <div class="flex gap-1.5 sm:gap-2 flex-wrap">
                 <button
                   type="button"
                   class="px-2.5 sm:px-3 py-1 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
-                  :class="reportPeriod === 'day' ? 'border-gold text-gold' : 'border-iron text-mist'"
-                  @click="reportPeriod = 'day'"
+                  :class="reportPeriod === 'day' && !reportStartDate ? 'border-gold text-gold' : 'border-iron text-mist'"
+                  @click="reportPeriod = 'day'; reportStartDate = ''; reportEndDate = ''; loadReports()"
                 >
                   Today
                 </button>
                 <button
                   type="button"
                   class="px-2.5 sm:px-3 py-1 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
-                  :class="reportPeriod === 'week' ? 'border-gold text-gold' : 'border-iron text-mist'"
-                  @click="reportPeriod = 'week'"
+                  :class="reportPeriod === 'week' && !reportStartDate ? 'border-gold text-gold' : 'border-iron text-mist'"
+                  @click="reportPeriod = 'week'; reportStartDate = ''; reportEndDate = ''; loadReports()"
                 >
                   This Week
                 </button>
                 <button
                   type="button"
                   class="px-2.5 sm:px-3 py-1 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
-                  :class="reportPeriod === 'month' ? 'border-gold text-gold' : 'border-iron text-mist'"
-                  @click="reportPeriod = 'month'"
+                  :class="reportPeriod === 'month' && !reportStartDate ? 'border-gold text-gold' : 'border-iron text-mist'"
+                  @click="reportPeriod = 'month'; reportStartDate = ''; reportEndDate = ''; loadReports()"
                 >
                   This Month
                 </button>
-              </div>
-              <div class="flex gap-2">
-                <input v-model="reportStartDate" type="date" class="input-field text-[11px] sm:text-sm" />
-                <input v-model="reportEndDate" type="date" class="input-field text-[11px] sm:text-sm" />
-              </div>
-              <div class="flex gap-2">
-                <button type="button" class="btn-primary shrink-0" :disabled="reportLoading" @click="loadReports">
-                  {{ reportLoading ? 'Loading…' : 'Load Report' }}
+                <span class="text-mist text-[10px] sm:text-xs self-center">or</span>
+                <input v-model="reportStartDate" type="date" class="input-field text-[11px] sm:text-sm w-auto" placeholder="From" />
+                <input v-model="reportEndDate" type="date" class="input-field text-[11px] sm:text-sm w-auto" placeholder="To" />
+                <button
+                  v-if="reportStartDate"
+                  type="button"
+                  class="btn-primary shrink-0"
+                  :disabled="reportLoading"
+                  @click="loadReports()"
+                >
+                  {{ reportLoading ? 'Loading…' : 'Load' }}
                 </button>
                 <button v-if="reportData" type="button" class="btn-outline shrink-0" @click="exportReport">
                   Export CSV
@@ -849,7 +852,14 @@ onUnmounted(() => {
 
             <p v-if="reportError" class="text-red-400 text-xs sm:text-sm mb-3 sm:mb-4">{{ reportError }}</p>
 
-            <template v-if="reportData">
+            <!-- Loading state -->
+            <div v-if="reportLoading" class="text-center py-10">
+              <p class="text-mist text-xs sm:text-sm">Loading report…</p>
+            </div>
+
+            <!-- Results -->
+            <template v-else-if="reportData">
+              <!-- Summary cards -->
               <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
                 <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
                   <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Total Visits</p>
@@ -869,9 +879,15 @@ onUnmounted(() => {
                 </div>
               </div>
 
+              <!-- Date range label -->
+              <p class="text-mist text-[10px] sm:text-xs mb-3 sm:mb-4">
+                Showing data from <span class="text-cream">{{ reportData.summary.dateFrom }}</span> to <span class="text-cream">{{ reportData.summary.dateTo }}</span>
+              </p>
+
+              <!-- Chart -->
               <div v-if="reportData.chartData.length > 0" class="mb-4 sm:mb-6">
                 <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">
-                  {{ reportPeriod === 'day' ? 'Hourly Breakdown' : reportPeriod === 'week' ? 'Weekly Breakdown' : 'Monthly Breakdown' }}
+                  {{ reportPeriod === 'day' ? 'Today\'s Breakdown' : reportPeriod === 'week' ? 'This Week\'s Breakdown' : 'This Month\'s Breakdown' }}
                 </h3>
                 <div class="overflow-x-auto">
                   <div class="flex items-end gap-2 sm:gap-3 min-h-[160px] sm:min-h-[200px] px-2 pb-8 relative">
@@ -896,6 +912,11 @@ onUnmounted(() => {
                 </div>
               </div>
 
+              <div v-else class="text-center py-6 mb-4 sm:mb-6">
+                <p class="text-mist text-xs sm:text-sm">No chart data for this period.</p>
+              </div>
+
+              <!-- Visit log -->
               <div v-if="reportData.visits.length > 0">
                 <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">Visit Log</h3>
                 <div class="overflow-x-auto">
@@ -924,8 +945,15 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <p v-else class="text-mist text-xs sm:text-sm text-center py-6">No visits found for the selected period.</p>
+              <div v-else class="text-center py-6">
+                <p class="text-mist text-xs sm:text-sm">No visits found for this period.</p>
+              </div>
             </template>
+
+            <!-- No data loaded yet -->
+            <div v-else class="text-center py-10">
+              <p class="text-mist text-xs sm:text-sm">Select a period and click Load to view the report.</p>
+            </div>
           </section>
         </template>
 
