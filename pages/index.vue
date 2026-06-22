@@ -170,6 +170,9 @@ function validateWalkinForm(): boolean {
   if (!walkinForm.phone.trim()) {
     walkinErrors.phone = 'Phone number is required'
     valid = false
+  } else if (!/^(09|\+639)\d{9}$/.test(walkinForm.phone.trim())) {
+    walkinErrors.phone = 'Enter a valid Philippine mobile number (09XXXXXXXXX)'
+    valid = false
   }
   if (!walkinForm.emergencyContact.trim()) {
     walkinErrors.emergencyContact = 'Emergency contact is required'
