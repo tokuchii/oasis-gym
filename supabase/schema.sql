@@ -13,7 +13,8 @@ create table if not exists walkin_passes (
   payment_amount    numeric default 0,
   created_at        timestamptz not null default now(),
   checked_in_at     timestamptz,
-  checked_in_by     text
+  checked_in_by     text,
+  points            numeric not null default 0
 );
 
 create index if not exists walkin_passes_pass_code_idx on walkin_passes (pass_code);

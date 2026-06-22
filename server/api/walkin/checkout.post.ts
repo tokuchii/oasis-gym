@@ -52,6 +52,7 @@ export default defineEventHandler(async (event) => {
       payment_amount: paymentAmount,
       checked_in_at: new Date().toISOString(),
       checked_in_by: 'staff',
+      points: (data.points ?? 0) + 2.5,
     })
     .eq('pass_code', passCode)
     .select('*')

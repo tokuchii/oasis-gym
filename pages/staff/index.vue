@@ -17,6 +17,7 @@ interface PassResult {
   createdAt: string
   checkedInAt: string | null
   checkedInBy: string | null
+  points: number
 }
 
 interface CoachItem {
@@ -63,7 +64,7 @@ const loginPassword = ref('')
 const loginError = ref('')
 const loginSubmitting = ref(false)
 
-const activeTab = ref<'checkout' | 'walkin' | 'reports' | 'coaches' | 'management'>('checkout')
+const activeTab = ref<'checkout' | 'walkin' | 'reports' | 'coaches' | 'management' | 'leaderboard'>('checkout')
 
 const walkinForm = reactive({
   fullName: '',
@@ -157,6 +158,59 @@ const clientLoading = ref(false)
 const clientError = ref('')
 const clientSuccess = ref('')
 const clientCoachFilter = ref('')
+
+interface LeaderboardEntry {
+  rank: number
+  id: string
+  passCode: string
+  fullName: string
+  email: string
+  phone: string
+  points: number
+  totalVisits: number
+}
+
+interface LeaderboardStats {
+  totalGuests: number
+  totalPointsAwarded: number
+  topGuestName: string | null
+  topGuestPoints: number
+}
+
+const leaderboardData = ref<LeaderboardEntry[]>([])
+const leaderboardStats = ref<LeaderboardStats | null>(null)
+const leaderboardLoading = ref(false)
+const leaderboardError = ref('')
+const leaderboardSearch = ref('')
+
+const filteredLeaderboard = computed(() => {
+  if (!leaderboardSearch.value.trim()) return leaderboardData.value
+  const q = leaderboardSearch.value.toLowerCase()
+  return leaderboardData.value.filter(
+    (e) => e.fullName.toLowerCase().includes(q) || e.passCode.toLowerCase().includes(q),
+  )
+})
+
+function rankBadge(rank: number) {
+  if (rank === 1) return '🥇'
+  if (rank === 2) return '🥈'
+  if (rank === 3) return '🥉'
+  return `#${rank}`
+}
+
+async function loadLeaderboard() {
+  leaderboardError.value = ''
+  leaderboardLoading.value = true
+  try {
+    const data = await $fetch<{ leaderboard: LeaderboardEntry[]; stats: LeaderboardStats }>('/api/walkin/leaderboard')
+    leaderboardData.value = data.leaderboard
+    leaderboardStats.value = data.stats
+  } catch {
+    leaderboardError.value = 'Failed to load leaderboard.'
+  } finally {
+    leaderboardLoading.value = false
+  }
+}
 
 const filteredClients = computed(() => {
   if (!clientCoachFilter.value) return clientsList.value
@@ -740,6 +794,14 @@ onUnmounted(() => {
             @click="activeTab = 'management'; loadClients()"
           >
             Management
+          </button>
+          <button
+            type="button"
+            class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
+            :class="activeTab === 'leaderboard' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
+            @click="activeTab = 'leaderboard'; loadLeaderboard()"
+          >
+            Leaderboard
           </button>
         </div>
 
@@ -1439,6 +1501,146 @@ onUnmounted(() => {
                     >
                       Remove
                     </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </template>
+
+        <!-- LEADERBOARD TAB -->
+        <template v-if="activeTab === 'leaderboard'">
+          <!-- Stats Cards -->
+          <div v-if="leaderboardStats && !leaderboardLoading" class="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Top Guest</p>
+              <p class="font-display text-lg sm:text-xl text-gold truncate">{{ leaderboardStats.topGuestName ?? '—' }}</p>
+              <p v-if="leaderboardStats.topGuestPoints > 0" class="text-cream text-[10px] sm:text-xs mt-0.5">{{ leaderboardStats.topGuestPoints }} pts</p>
+            </div>
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Ranked Guests</p>
+              <p class="font-display text-2xl sm:text-3xl text-gold">{{ leaderboardStats.totalGuests }}</p>
+            </div>
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center col-span-2 sm:col-span-1">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Total Points Given</p>
+              <p class="font-display text-2xl sm:text-3xl text-gold">{{ leaderboardStats.totalPointsAwarded }}</p>
+            </div>
+          </div>
+
+          <section class="card p-4 sm:p-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+              <div>
+                <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide">Leaderboard</h2>
+                <p class="text-mist text-[10px] sm:text-xs mt-0.5">Walk-in guests ranked by total points (2.5 pts per check-out)</p>
+              </div>
+              <div class="flex gap-2 items-center">
+                <input
+                  v-model="leaderboardSearch"
+                  type="text"
+                  class="input-field text-[10px] sm:text-xs px-3 py-1.5 w-36 sm:w-44"
+                  placeholder="Search name or code…"
+                />
+                <button
+                  type="button"
+                  class="btn-outline text-[10px] sm:text-xs px-3 py-1.5 shrink-0"
+                  :disabled="leaderboardLoading"
+                  @click="loadLeaderboard()"
+                >
+                  {{ leaderboardLoading ? 'Loading…' : 'Refresh' }}
+                </button>
+              </div>
+            </div>
+
+            <p v-if="leaderboardError" class="text-red-400 text-xs sm:text-sm mb-3 sm:mb-4">{{ leaderboardError }}</p>
+
+            <div v-if="leaderboardLoading" class="text-center py-12">
+              <div class="inline-flex items-center gap-2 text-mist text-xs sm:text-sm">
+                <svg class="animate-spin h-4 w-4 text-gold" viewBox="0 0 24 24" fill="none">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Loading leaderboard…
+              </div>
+            </div>
+
+            <div v-else-if="filteredLeaderboard.length === 0" class="text-center py-12">
+              <div class="text-4xl sm:text-5xl mb-3">🏆</div>
+              <p class="text-cream text-sm sm:text-base font-medium">{{ leaderboardSearch ? 'No matching guests found.' : 'No guests with points yet.' }}</p>
+              <p class="text-mist text-[10px] sm:text-xs mt-1">{{ leaderboardSearch ? 'Try a different search term.' : 'Points are awarded when staff check out a walk-in guest.' }}</p>
+            </div>
+
+            <div v-else class="space-y-3 sm:space-y-4">
+              <!-- Top 3 Podium -->
+              <div v-if="!leaderboardSearch && filteredLeaderboard.length >= 1" class="flex items-end justify-center gap-2 sm:gap-4 mb-4 sm:mb-8 px-2">
+                <!-- 2nd Place -->
+                <div v-if="filteredLeaderboard.length >= 2" class="flex-1 max-w-[120px] text-center">
+                  <div class="relative mx-auto mb-2">
+                    <div class="w-16 h-16 sm:w-20 sm:h-20 mx-auto rounded-full bg-graphite border-2 border-mist/40 flex items-center justify-center">
+                      <span class="text-2xl sm:text-3xl">🥈</span>
+                    </div>
+                  </div>
+                  <div class="bg-graphite border border-iron p-2 sm:p-3 rounded-t-lg">
+                    <p class="text-cream text-[11px] sm:text-sm font-medium truncate">{{ filteredLeaderboard[1].fullName }}</p>
+                    <p class="text-mist text-[9px] sm:text-[10px]">{{ filteredLeaderboard[1].totalVisits }} visits</p>
+                    <p class="text-gold font-display text-base sm:text-lg mt-0.5">{{ filteredLeaderboard[1].points }} pts</p>
+                  </div>
+                  <div class="bg-mist/20 h-6 sm:h-8 rounded-b-lg flex items-center justify-center">
+                    <span class="text-mist font-display text-sm sm:text-base">2</span>
+                  </div>
+                </div>
+
+                <!-- 1st Place -->
+                <div class="flex-1 max-w-[140px] text-center">
+                  <div class="relative mx-auto mb-2">
+                    <div class="w-20 h-20 sm:w-24 sm:h-24 mx-auto rounded-full bg-gold/10 border-2 border-gold flex items-center justify-center shadow-lg shadow-gold/20">
+                      <span class="text-3xl sm:text-4xl">🥇</span>
+                    </div>
+                  </div>
+                  <div class="bg-graphite border-2 border-gold p-3 sm:p-4 rounded-t-lg">
+                    <p class="text-cream text-xs sm:text-sm font-semibold truncate">{{ filteredLeaderboard[0].fullName }}</p>
+                    <p class="text-mist text-[9px] sm:text-[10px]">{{ filteredLeaderboard[0].totalVisits }} visits</p>
+                    <p class="text-gold font-display text-xl sm:text-2xl mt-0.5">{{ filteredLeaderboard[0].points }} pts</p>
+                  </div>
+                  <div class="bg-gold/20 h-8 sm:h-10 rounded-b-lg flex items-center justify-center">
+                    <span class="text-gold font-display text-base sm:text-lg font-semibold">1</span>
+                  </div>
+                </div>
+
+                <!-- 3rd Place -->
+                <div v-if="filteredLeaderboard.length >= 3" class="flex-1 max-w-[120px] text-center">
+                  <div class="relative mx-auto mb-2">
+                    <div class="w-14 h-14 sm:w-18 sm:h-18 mx-auto rounded-full bg-graphite border-2 border-amber-700/40 flex items-center justify-center">
+                      <span class="text-xl sm:text-2xl">🥉</span>
+                    </div>
+                  </div>
+                  <div class="bg-graphite border border-iron p-2 sm:p-3 rounded-t-lg">
+                    <p class="text-cream text-[11px] sm:text-sm font-medium truncate">{{ filteredLeaderboard[2].fullName }}</p>
+                    <p class="text-mist text-[9px] sm:text-[10px]">{{ filteredLeaderboard[2].totalVisits }} visits</p>
+                    <p class="text-gold font-display text-base sm:text-lg mt-0.5">{{ filteredLeaderboard[2].points }} pts</p>
+                  </div>
+                  <div class="bg-amber-900/20 h-5 sm:h-6 rounded-b-lg flex items-center justify-center">
+                    <span class="text-amber-600 font-display text-sm sm:text-base">3</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Remaining List -->
+              <div v-if="filteredLeaderboard.length > 3 || leaderboardSearch" class="space-y-1.5 sm:space-y-2">
+                <div
+                  v-for="entry in leaderboardSearch ? filteredLeaderboard : filteredLeaderboard.slice(3)"
+                  :key="entry.id"
+                  class="flex items-center gap-3 sm:gap-4 bg-graphite border border-iron p-3 sm:p-4 hover:border-gold/30 transition-colors"
+                >
+                  <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-iron/50 flex items-center justify-center shrink-0">
+                    <span class="text-mist text-xs sm:text-sm font-display">{{ rankBadge(entry.rank) }}</span>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <p class="text-cream text-sm sm:text-base font-medium truncate">{{ entry.fullName }}</p>
+                    <p class="text-mist text-[9px] sm:text-[10px]">{{ entry.totalVisits }} visits · {{ entry.passCode }}</p>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <p class="text-gold font-display text-lg sm:text-xl">{{ entry.points }}</p>
+                    <p class="text-mist text-[8px] sm:text-[10px] uppercase tracking-wider">pts</p>
                   </div>
                 </div>
               </div>

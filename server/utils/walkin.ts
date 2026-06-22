@@ -92,5 +92,6 @@ export function serializePass(pass: WalkinPass) {
     createdAt: pass.created_at,
     checkedInAt: pass.checked_in_at,
     checkedInBy: pass.checked_in_by,
+    points: pass.points ?? 0,
   }
 }

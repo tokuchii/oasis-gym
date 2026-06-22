@@ -13,6 +13,7 @@ export interface WalkinPass {
   created_at: string
   checked_in_at: string | null
   checked_in_by: string | null
+  points: number
 }
 
 export interface WalkinRegisterPayload {
