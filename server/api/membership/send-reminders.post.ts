@@ -21,7 +21,8 @@ export default defineEventHandler(async (event) => {
     .gte('expiry_date', today)
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: error.message })
+    console.error('[Reminders] Query error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to load expiring memberships.' })
   }
 
   if (!expiring || expiring.length === 0) {

@@ -1,7 +1,12 @@
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { sendCertificationEmail } from '~/server/utils/email'
+import { validateMembershipPayload, checkRateLimit } from '~/server/utils/walkin'
 
 export default defineEventHandler(async (event) => {
+  const ip = getRequestHeader(event, 'x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+  const rateError = checkRateLimit(`membership:${ip}`, 3, 300000)
+  if (rateError) throw createError({ statusCode: 429, statusMessage: rateError })
+
   const formData = await readMultipartFormData(event)
   if (!formData) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid form data.' })
@@ -12,37 +17,21 @@ export default defineEventHandler(async (event) => {
     return field ? Buffer.from(field.data).toString('utf-8').trim() : ''
   }
 
-  const fullName = getField('fullName')
-  const email = getField('email')
-  const phone = getField('phone')
-  const planRaw = getField('plan').toLowerCase()
+  const fields = {
+    fullName: getField('fullName'),
+    email: getField('email'),
+    phone: getField('phone'),
+    plan: getField('plan'),
+    paymentMethod: getField('paymentMethod'),
+    referenceNo: getField('referenceNo'),
+    amount: getField('amount'),
+  }
+
+  const payload = validateMembershipPayload(fields)
+
   const coach = getField('coach') || null
-  const paymentMethod = getField('paymentMethod')
-  const referenceNo = getField('referenceNo') || null
-  const amount = Number(getField('amount'))
   const receiptFile = formData.find((f) => f.name === 'receipt')
 
-  if (!fullName) {
-    throw createError({ statusCode: 400, statusMessage: 'Full name is required.' })
-  }
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw createError({ statusCode: 400, statusMessage: 'Valid email is required.' })
-  }
-  if (!phone) {
-    throw createError({ statusCode: 400, statusMessage: 'Phone number is required.' })
-  }
-  if (!/^(09|\+639)\d{9}$/.test(phone)) {
-    throw createError({ statusCode: 400, statusMessage: 'Phone must be a valid Philippine mobile number (09XXXXXXXXX).' })
-  }
-  if (planRaw !== 'weekly' && planRaw !== 'monthly') {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid plan. Must be weekly or monthly.' })
-  }
-  if (!paymentMethod) {
-    throw createError({ statusCode: 400, statusMessage: 'Payment method is required.' })
-  }
-  if (isNaN(amount) || amount <= 0) {
-    throw createError({ statusCode: 400, statusMessage: 'Valid payment amount is required.' })
-  }
   if (!receiptFile || !receiptFile.filename) {
     throw createError({ statusCode: 400, statusMessage: 'Payment receipt is required.' })
   }
@@ -55,17 +44,13 @@ export default defineEventHandler(async (event) => {
   const allowedTypes = ['image/jpeg']
   const ext = receiptFile.filename?.split('.').pop()?.toLowerCase() ?? ''
   const allowedExts = ['jpg', 'jpeg']
-  if (!allowedTypes.includes(receiptFile.type ?? '') && !allowedExts.includes(ext)) {
+  if (!allowedTypes.includes(receiptFile.type ?? '') || !allowedExts.includes(ext)) {
     throw createError({ statusCode: 400, statusMessage: 'Only JPEG images (.jpg/.jpeg) are accepted.' })
   }
 
   const now = new Date()
   const expiryDate = new Date(now)
-  if (planRaw === 'weekly') {
-    expiryDate.setDate(expiryDate.getDate() + 7)
-  } else {
-    expiryDate.setMonth(expiryDate.getMonth() + 1)
-  }
+  expiryDate.setFullYear(expiryDate.getFullYear() + 1)
   const expiryDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(expiryDate)
 
   const supabase = useSupabaseAdmin()
@@ -81,20 +66,21 @@ export default defineEventHandler(async (event) => {
     })
 
   if (uploadError) {
-    throw createError({ statusCode: 500, statusMessage: `Failed to upload receipt: ${uploadError.message}` })
+    console.error('[Membership] Upload error:', uploadError)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to upload receipt. Please try again.' })
   }
 
   const { data, error } = await supabase
     .from('membership_payments')
     .insert({
-      full_name: fullName,
-      email,
-      phone,
-      plan: planRaw,
+      full_name: payload.fullName,
+      email: payload.email,
+      phone: payload.phone,
+      plan: payload.plan,
       coach,
-      payment_method: paymentMethod,
-      reference_no: referenceNo,
-      amount,
+      payment_method: payload.paymentMethod,
+      reference_no: payload.referenceNo || null,
+      amount: payload.amount,
       receipt_url: filePath,
       expiry_date: expiryDateStr,
       reminder_sent: false,
@@ -103,13 +89,14 @@ export default defineEventHandler(async (event) => {
     .single()
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: error.message })
+    console.error('[Membership] Insert error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to submit payment. Please try again.' })
   }
 
   let emailSent = false
   let emailError = ''
   try {
-    await sendCertificationEmail({ to: email, fullName, plan: planRaw })
+    await sendCertificationEmail({ to: payload.email, fullName: payload.fullName, plan: payload.plan })
     emailSent = true
   } catch (err) {
     console.error('[Membership] Failed to send certification email:', err)

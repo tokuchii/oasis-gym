@@ -1,8 +1,12 @@
 import { generatePassCode } from '~/server/utils/pass-code'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
-import { getVisitDateManila, resolvePassStatus, serializePass, validateWalkinPayload } from '~/server/utils/walkin'
+import { getVisitDateManila, resolvePassStatus, serializePass, validateWalkinPayload, checkRateLimit } from '~/server/utils/walkin'
 
 export default defineEventHandler(async (event) => {
+  const ip = getRequestHeader(event, 'x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+  const rateError = checkRateLimit(`register:${ip}`, 5, 60000)
+  if (rateError) throw createError({ statusCode: 429, statusMessage: rateError })
+
   const payload = validateWalkinPayload(await readBody(event))
   const supabase = useSupabaseAdmin()
   const visitDate = getVisitDateManila()
@@ -15,9 +19,10 @@ export default defineEventHandler(async (event) => {
     .maybeSingle()
 
   if (existingError) {
+    console.error('[Register] Lookup error:', existingError)
     throw createError({
       statusCode: 500,
-      statusMessage: `Lookup failed [${existingError.code}]: ${existingError.message}`,
+      statusMessage: 'An error occurred. Please try again.',
     })
   }
 
@@ -65,9 +70,10 @@ export default defineEventHandler(async (event) => {
       continue
     }
 
+    console.error('[Register] Insert error:', error)
     throw createError({
       statusCode: 500,
-      statusMessage: `Supabase error [${error?.code}]: ${error?.message}`,
+      statusMessage: 'Failed to create day pass. Please try again.',
     })
   }
 

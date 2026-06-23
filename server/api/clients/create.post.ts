@@ -1,6 +1,9 @@
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 
+const SESSION_LIMITS: Record<string, number> = { weekly: 4, monthly: 13 }
+const PLAN_PRICES: Record<string, number> = { weekly: 599, monthly: 1499 }
+
 export default defineEventHandler(async (event) => {
   requireStaff(event)
 
@@ -11,6 +14,8 @@ export default defineEventHandler(async (event) => {
   const clientPhone = String(body?.clientPhone ?? '').trim()
   const coachName = String(body?.coachName ?? '').trim() || null
   const plan = String(body?.plan ?? '')
+  const paidAmount = body?.paidAmount != null ? Number(body.paidAmount) : null
+  const note = String(body?.note ?? '').trim() || null
 
   if (!clientName) {
     throw createError({ statusCode: 400, statusMessage: 'Client name is required.' })
@@ -25,11 +30,13 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Plan must be weekly or monthly.' })
   }
 
-  const totalSessions = plan === 'weekly' ? 4 : 13
+  const totalSessions = SESSION_LIMITS[plan] ?? 4
+  const totalAmount = PLAN_PRICES[plan] ?? 599
 
   const now = new Date()
   const startDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(now)
-  const endDate = new Date(now.getTime() + (plan === 'weekly' ? 7 : 30) * 24 * 60 * 60 * 1000)
+  const endDate = new Date(now)
+  endDate.setFullYear(endDate.getFullYear() + 1)
   const endDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(endDate)
 
   const supabase = useSupabaseAdmin()
@@ -47,16 +54,21 @@ export default defineEventHandler(async (event) => {
       start_date: startDate,
       end_date: endDateStr,
       status: 'active',
+      paid_amount: paidAmount != null && !isNaN(paidAmount) ? paidAmount : null,
+      note: note ?? (paidAmount != null && !isNaN(paidAmount) ? `Paid ₱${paidAmount} of ₱${totalAmount}` : null),
     })
     .select('*')
     .single()
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: error.message })
+    console.error('[Clients] Create error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to create client.' })
   }
+
+  const isFullyPaid = paidAmount != null && paidAmount >= totalAmount
 
   return {
     client: data,
-    message: `Client added. ${totalSessions} sessions for ${plan} plan.`,
+    message: `Client added. ${totalSessions} sessions for ${plan} plan.${isFullyPaid ? ' Fully paid.' : paidAmount != null ? ` ₱${paidAmount} of ₱${totalAmount} paid.` : ' Payment pending.'}`,
   }
 })

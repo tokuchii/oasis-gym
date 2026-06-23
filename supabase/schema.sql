@@ -35,8 +35,11 @@ create table if not exists membership_payments (
   reference_no      text,
   amount            numeric not null,
   receipt_url       text,
-  status            text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  status            text not null default 'pending' check (status in ('pending', 'partial', 'approved', 
+'rejected')),
   expiry_date       date,
+  note              text,
+  paid_amount       numeric,
   reminder_sent     boolean not null default false,
   created_at        timestamptz not null default now()
 );
@@ -60,6 +63,9 @@ create table if not exists client_sessions (
   start_date        date not null default (timezone('Asia/Manila', now()))::date,
   end_date          date not null,
   status            text not null default 'active' check (status in ('active', 'completed', 'expired')),
+  removed           boolean not null default false,
+  note              text,
+  paid_amount       numeric,
   created_at        timestamptz not null default now()
 );
 

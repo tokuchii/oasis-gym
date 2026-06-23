@@ -1,7 +1,7 @@
 import { requireStaff } from '~/server/utils/auth'
 import { normalizePassCode } from '~/server/utils/pass-code'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
-import { serializePass } from '~/server/utils/walkin'
+import { serializePass, normalizePhone } from '~/server/utils/walkin'
 
 function escapeLike(input: string): string {
   return input.replace(/[%_]/g, (c) => `\\${c}`)
@@ -31,7 +31,8 @@ export default defineEventHandler(async (event) => {
     }
     request = request.eq('pass_code', code)
   } else if (phone) {
-    request = request.ilike('phone', `%${escapeLike(phone)}%`)
+    const normalized = normalizePhone(phone)
+    request = request.ilike('phone', `%${escapeLike(normalized)}%`)
   } else {
     request = request.ilike('full_name', `%${escapeLike(name)}%`)
   }
@@ -39,7 +40,8 @@ export default defineEventHandler(async (event) => {
   const { data, error } = await request.order('created_at', { ascending: false }).limit(10)
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: error.message })
+    console.error('[Lookup] Search error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Search failed. Please try again.' })
   }
 
   return {

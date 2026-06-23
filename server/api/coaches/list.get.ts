@@ -13,13 +13,24 @@ export default defineEventHandler(async () => {
     throw createError({ statusCode: 500, statusMessage: error.message })
   }
 
-  return {
-    coaches: (data ?? []).map((c) => ({
-      id: c.id,
-      fullName: c.full_name,
-      specialty: c.specialty,
-      bio: c.bio,
-      photoUrl: c.photo_url,
-    })),
-  }
+  const coaches = await Promise.all(
+    (data ?? []).map(async (c) => {
+      let photoUrl = c.photo_url
+      if (photoUrl && photoUrl.startsWith('coach-photos/')) {
+        const { data: signed } = await supabase.storage
+          .from('oasis-gym')
+          .createSignedUrl(photoUrl, 86400)
+        if (signed?.signedUrl) photoUrl = signed.signedUrl
+      }
+      return {
+        id: c.id,
+        fullName: c.full_name,
+        specialty: c.specialty,
+        bio: c.bio,
+        photoUrl,
+      }
+    }),
+  )
+
+  return { coaches }
 })

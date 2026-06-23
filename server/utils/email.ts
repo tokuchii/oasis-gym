@@ -90,7 +90,7 @@ async function sendEmail(to: string, subject: string, html: string, textFallback
       'X-Auto-Response-Suppress': 'All',
     },
   })
-  console.log('[Email] Sent to:', to, '| ID:', info.messageId, '| Response:', info.response)
+  console.log('[Email] Sent | ID:', info.messageId)
   return info.messageId
 }
 
@@ -101,11 +101,7 @@ export async function sendCertificationEmail(params: {
 }) {
   const planLabel = params.plan === 'weekly' ? 'Weekly' : 'Monthly'
   const expiryDate = new Date()
-  if (params.plan === 'weekly') {
-    expiryDate.setDate(expiryDate.getDate() + 7)
-  } else {
-    expiryDate.setMonth(expiryDate.getMonth() + 1)
-  }
+  expiryDate.setFullYear(expiryDate.getFullYear() + 1)
 
   const expiryStr = expiryDate.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
 

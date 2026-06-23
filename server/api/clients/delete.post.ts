@@ -12,14 +12,25 @@ export default defineEventHandler(async (event) => {
   }
 
   const supabase = useSupabaseAdmin()
+
+  const { data: client, error: fetchErr } = await supabase
+    .from('client_sessions')
+    .select('*')
+    .eq('id', clientId)
+    .single()
+
+  if (fetchErr || !client) {
+    throw createError({ statusCode: 404, statusMessage: 'Client not found.' })
+  }
+
   const { error } = await supabase
     .from('client_sessions')
-    .delete()
+    .update({ removed: true })
     .eq('id', clientId)
 
   if (error) {
     throw createError({ statusCode: 500, statusMessage: error.message })
   }
 
-  return { message: 'Client removed.' }
+  return { message: `${client.client_name} moved to history.` }
 })

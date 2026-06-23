@@ -42,7 +42,9 @@ export interface MembershipPayment {
   reference_no: string | null
   amount: number
   receipt_url: string | null
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'partial' | 'approved' | 'rejected'
+  note: string | null
+  paid_amount: number | null
   expiry_date: string | null
   reminder_sent: boolean
   created_at: string
@@ -78,6 +80,8 @@ export interface ClientSession {
   start_date: string
   end_date: string
   status: 'active' | 'completed' | 'expired'
+  note: string | null
+  paid_amount: number | null
   created_at: string
 }
 
