@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { MEMBERSHIP_PLANS, MEMBERSHIP_PLANS_DISPLAY } from '~/types/walkin'
+import { extractRefFromReceipt } from '~/composables/useReceiptOcr'
+import { useToast } from '~/composables/useToast'
+
+const toast = useToast()
 
 useHead({
   title: 'OASIS FITNESS GYM — Calauan, Laguna',
@@ -60,6 +64,21 @@ const operatingHours = [
 const mobileMenuOpen = ref(false)
 const showScrollTop = ref(false)
 const activeSection = ref('')
+const showPromo = ref(false)
+
+onMounted(() => {
+  const dismissed = sessionStorage.getItem('promo_dismissed')
+  if (!dismissed) {
+    setTimeout(() => {
+      showPromo.value = true
+    }, 1500)
+  }
+})
+
+function dismissPromo() {
+  showPromo.value = false
+  sessionStorage.setItem('promo_dismissed', '1')
+}
 
 const paymentForm = reactive({
   fullName: '',
@@ -72,21 +91,25 @@ const paymentForm = reactive({
   amount: '',
   notes: '',
 })
+const paymentFormHoneypot = ref('')
+const paymentFormLoadedAt = Date.now()
 
 watch(() => paymentForm.plan, (newPlan) => {
   const found = MEMBERSHIP_PLANS.find((p) => p.name === newPlan)
   if (found) {
-    paymentForm.amount = found.price
+    paymentForm.amount = found.price.replace(/,/g, '')
   }
 })
 
 const paymentReceipt = ref<File | null>(null)
 const receiptPreviewUrl = ref('')
+const ocrLoading = ref(false)
+const ocrMessage = ref('')
 const paymentErrors = reactive<Record<string, string>>({})
 const showPaymentConfirm = ref(false)
 const showWalkinConfirm = ref(false)
 const paymentSubmitting = ref(false)
-const paymentSuccess = ref(false)
+const walkinSubmitting = ref(false)
 
 const walkinForm = reactive({
   fullName: '',
@@ -95,8 +118,9 @@ const walkinForm = reactive({
   emergencyContact: '',
   waiverAccepted: false,
 })
+const walkinFormHoneypot = ref('')
+const walkinFormLoadedAt = Date.now()
 const walkinErrors = reactive<Record<string, string>>({})
-const walkinSubmitting = ref(false)
 const walkinSuccess = ref(false)
 const walkinPassCode = ref('')
 const walkinQrDataUrl = ref('')
@@ -128,49 +152,70 @@ function validatePaymentForm(): boolean {
   Object.keys(paymentErrors).forEach((k) => delete paymentErrors[k])
   let valid = true
 
-  if (!paymentForm.fullName.trim()) {
+  if (paymentFormHoneypot.value) return true
+  if (Date.now() - paymentFormLoadedAt < 3000) {
+    paymentErrors.submit = 'Form submitted too fast. Please try again.'
+    return false
+  }
+
+  const name = paymentForm.fullName.trim()
+  if (!name) {
     paymentErrors.fullName = 'Full name is required'
     valid = false
+  } else if (name.length < 2) {
+    paymentErrors.fullName = 'Full name must be at least 2 characters'
+    valid = false
+  } else if (name.length > 100) {
+    paymentErrors.fullName = 'Full name is too long (max 100 characters)'
+    valid = false
   }
-  if (!paymentForm.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paymentForm.email)) {
+
+  const email = paymentForm.email.trim()
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     paymentErrors.email = 'Valid email is required'
     valid = false
+  } else if (email.length > 254) {
+    paymentErrors.email = 'Email is too long'
+    valid = false
   }
-  if (!paymentForm.phone.trim()) {
+
+  const phone = paymentForm.phone.trim()
+  if (!phone) {
     paymentErrors.phone = 'Phone number is required'
     valid = false
-  } else if (!/^(09|\+639)\d{9}$/.test(paymentForm.phone.trim())) {
-    paymentErrors.phone = 'Enter a valid Philippine mobile number (09XXXXXXXXX)'
+  } else if (!/^(\+639|09)\d{9}$/.test(phone)) {
+    paymentErrors.phone = 'Enter a valid Philippine mobile number (+639XXXXXXXXX)'
     valid = false
   }
+
   if (!paymentForm.plan) {
     paymentErrors.plan = 'Please select a plan'
     valid = false
   }
-  if (!paymentForm.referenceNo.trim()) {
-    paymentErrors.referenceNo = 'Reference number is required'
+
+  const ref = paymentForm.referenceNo.trim()
+  if (!ref) {
+    paymentErrors.referenceNo = 'Reference number is required — type it or upload receipt to auto-fill'
     valid = false
-  } else {
-    const ref = paymentForm.referenceNo.trim()
-    if (paymentForm.paymentMethod === 'gcash') {
-      if (!/^[A-Za-z0-9]{8,20}$/.test(ref)) {
-        paymentErrors.referenceNo = 'GCash ref must be 8–20 alphanumeric characters'
-        valid = false
-      }
-    } else if (paymentForm.paymentMethod === 'bank') {
-      if (!/^[A-Za-z0-9]{10,30}$/.test(ref)) {
-        paymentErrors.referenceNo = 'Bank ref must be 10–30 alphanumeric characters'
-        valid = false
-      }
-    }
+  } else if (ref.length > 40) {
+    paymentErrors.referenceNo = 'Reference number is too long (max 40 characters)'
+    valid = false
   }
+
   if (!paymentForm.amount.trim()) {
     paymentErrors.amount = 'Amount is required'
     valid = false
   } else if (!/^\d{1,6}(\.\d{1,2})?$/.test(paymentForm.amount.trim())) {
     paymentErrors.amount = 'Enter a valid amount (e.g. 1499 or 1499.50)'
     valid = false
+  } else {
+    const amt = parseFloat(paymentForm.amount.trim())
+    if (amt <= 0 || amt > 100000) {
+      paymentErrors.amount = 'Amount must be between ₱1 and ₱100,000'
+      valid = false
+    }
   }
+
   if (!paymentReceipt.value) {
     paymentErrors.receipt = 'Payment receipt is required'
     valid = false
@@ -183,31 +228,70 @@ function validateWalkinForm(): boolean {
   Object.keys(walkinErrors).forEach((k) => delete walkinErrors[k])
   let valid = true
 
-  if (!walkinForm.fullName.trim()) {
+  if (walkinFormHoneypot.value) return true
+  if (Date.now() - walkinFormLoadedAt < 3000) {
+    walkinErrors.submit = 'Form submitted too fast. Please try again.'
+    return false
+  }
+
+  const name = walkinForm.fullName.trim()
+  if (!name) {
     walkinErrors.fullName = 'Full name is required'
     valid = false
+  } else if (name.length < 2) {
+    walkinErrors.fullName = 'Full name must be at least 2 characters'
+    valid = false
+  } else if (name.length > 100) {
+    walkinErrors.fullName = 'Full name is too long (max 100 characters)'
+    valid = false
   }
-  if (!walkinForm.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(walkinForm.email)) {
+
+  const email = walkinForm.email.trim()
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     walkinErrors.email = 'Valid email is required'
     valid = false
+  } else if (email.length > 254) {
+    walkinErrors.email = 'Email is too long'
+    valid = false
   }
-  if (!walkinForm.phone.trim()) {
+
+  const phone = walkinForm.phone.trim()
+  if (!phone) {
     walkinErrors.phone = 'Phone number is required'
     valid = false
-  } else if (!/^(09|\+639)\d{9}$/.test(walkinForm.phone.trim())) {
-    walkinErrors.phone = 'Enter a valid Philippine mobile number (09XXXXXXXXX)'
+  } else if (!/^(\+639|09)\d{9}$/.test(phone)) {
+    walkinErrors.phone = 'Enter a valid Philippine mobile number (+639XXXXXXXXX)'
     valid = false
   }
-  if (!walkinForm.emergencyContact.trim()) {
+
+  const emergency = walkinForm.emergencyContact.trim()
+  if (!emergency) {
     walkinErrors.emergencyContact = 'Emergency contact is required'
     valid = false
+  } else if (emergency.length < 2) {
+    walkinErrors.emergencyContact = 'Emergency contact must be at least 2 characters'
+    valid = false
+  } else if (emergency.length > 100) {
+    walkinErrors.emergencyContact = 'Emergency contact is too long (max 100 characters)'
+    valid = false
   }
+
   if (!walkinForm.waiverAccepted) {
     walkinErrors.waiver = 'You must accept the waiver to continue'
     valid = false
   }
 
   return valid
+}
+
+function formatPhone(phone: string): string {
+  const cleaned = phone.replace(/[\s\-()]/g, '')
+  if (!cleaned) return ''
+  if (cleaned.startsWith('+639') && cleaned.length === 13) return cleaned
+  if (cleaned.startsWith('639') && cleaned.length === 12) return '+' + cleaned
+  if (cleaned.startsWith('09') && cleaned.length === 11) return '+63' + cleaned.slice(1)
+  if (/^\d{10}$/.test(cleaned)) return '+63' + cleaned
+  return cleaned
 }
 
 function handleReceiptChange(event: Event) {
@@ -237,6 +321,24 @@ function handleReceiptChange(event: Event) {
   } else {
     receiptPreviewUrl.value = ''
   }
+
+  ocrLoading.value = true
+  ocrMessage.value = 'Scanning receipt for reference number...'
+  extractRefFromReceipt(file).then((ref) => {
+    if (ref) {
+      paymentForm.referenceNo = ref
+      ocrMessage.value = `Reference number detected: ${ref}`
+      toast.success(`Reference number detected: ${ref}`)
+    } else {
+      ocrMessage.value = 'Could not detect reference number. Please enter it manually.'
+      toast.warning('Could not detect reference number. Please type it manually.')
+    }
+  }).catch(() => {
+    ocrMessage.value = 'Could not scan receipt. Please enter reference number manually.'
+    toast.error('Could not scan receipt. Please enter reference number manually.')
+  }).finally(() => {
+    ocrLoading.value = false
+  })
 }
 
 function onPaymentSubmit() {
@@ -248,7 +350,6 @@ function onWalkinSubmit() {
 }
 
 async function submitPaymentForm() {
-  paymentSuccess.value = false
   if (!validatePaymentForm()) return
 
   paymentSubmitting.value = true
@@ -270,8 +371,7 @@ async function submitPaymentForm() {
       method: 'POST',
       body: formData,
     })
-    paymentSuccess.value = true
-    setTimeout(() => { paymentSuccess.value = false }, 8000)
+    toast.success('Payment submitted! A certification email has been sent to your email.')
 
     Object.assign(paymentForm, {
       fullName: '',
@@ -288,7 +388,7 @@ async function submitPaymentForm() {
     receiptPreviewUrl.value = ''
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
-    paymentErrors.submit = fetchErr.data?.statusMessage ?? 'Submission failed. Please try again.'
+    toast.error(fetchErr.data?.statusMessage ?? 'Submission failed. Please try again.')
   } finally {
     paymentSubmitting.value = false
   }
@@ -335,7 +435,7 @@ async function submitWalkinForm() {
     })
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
-    walkinSubmitError.value = fetchErr.data?.statusMessage ?? 'Registration failed. Please try again.'
+    toast.error(fetchErr.data?.statusMessage ?? 'Registration failed. Please try again.')
   } finally {
     walkinSubmitting.value = false
   }
@@ -588,7 +688,7 @@ onUnmounted(() => {
             class="reveal card p-4 sm:p-6 flex flex-col items-center text-center"
           >
             <div class="w-20 h-20 sm:w-28 sm:h-28 rounded-full overflow-hidden border-2 border-gold/30 mb-3 sm:mb-4 bg-graphite flex items-center justify-center">
-              <img v-if="coach.photoUrl" :src="coach.photoUrl" :alt="coach.fullName" class="w-full h-full object-cover" />
+              <img v-if="coach.photoUrl" :src="coach.photoUrl" :alt="coach.fullName" class="w-full h-full object-cover" loading="lazy" decoding="async" width="112" height="112" />
               <span v-else class="text-gold font-display text-2xl sm:text-3xl">{{ coach.fullName.charAt(0) }}</span>
             </div>
             <h3 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-1">{{ coach.fullName }}</h3>
@@ -709,7 +809,7 @@ onUnmounted(() => {
                     </div>
                     <div>
                       <label for="pay-phone" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Phone *</label>
-                      <input id="pay-phone" v-model="paymentForm.phone" type="tel" class="input-field" maxlength="11" placeholder="09XXXXXXXXX" />
+                      <input id="pay-phone" v-model="paymentForm.phone" type="tel" class="input-field" maxlength="13" placeholder="+639XXXXXXXXX" @blur="paymentForm.phone = formatPhone(paymentForm.phone)" />
                       <p v-if="paymentErrors.phone" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.phone }}</p>
                     </div>
                   </div>
@@ -749,9 +849,11 @@ onUnmounted(() => {
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
                   <div>
                     <label for="pay-ref" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Reference No. *</label>
-                    <input id="pay-ref" v-model="paymentForm.referenceNo" type="text" class="input-field" maxlength="30" :placeholder="paymentForm.paymentMethod === 'gcash' ? 'e.g. GC123456789' : 'e.g. BDO12345678901234'" />
-                    <p v-if="paymentForm.paymentMethod === 'gcash'" class="text-mist/50 text-[9px] sm:text-[10px] mt-0.5">8–20 alphanumeric characters</p>
-                    <p v-else-if="paymentForm.paymentMethod === 'bank'" class="text-mist/50 text-[9px] sm:text-[10px] mt-0.5">10–30 alphanumeric characters</p>
+                    <input id="pay-ref" v-model="paymentForm.referenceNo" type="text" class="input-field" :class="paymentReceipt && (ocrLoading || paymentForm.referenceNo) ? 'bg-graphite/50 cursor-not-allowed opacity-60' : ''" :readonly="!!paymentReceipt && (ocrLoading || !!paymentForm.referenceNo)" :disabled="!!paymentReceipt && (ocrLoading || !!paymentForm.referenceNo)" :placeholder="paymentReceipt ? (paymentForm.referenceNo ? 'Scanned from receipt...' : 'Type reference number...') : 'Upload receipt to auto-fill'" />
+                    <p v-if="paymentReceipt && ocrLoading" class="text-gold text-[9px] sm:text-[10px] mt-0.5">Scanning receipt...</p>
+                    <p v-else-if="paymentReceipt && paymentForm.referenceNo" class="text-green-400 text-[9px] sm:text-[10px] mt-0.5">Auto-filled from receipt</p>
+                    <p v-else-if="paymentReceipt && !paymentForm.referenceNo" class="text-yellow-400 text-[9px] sm:text-[10px] mt-0.5">Could not detect ref. no — type it manually below</p>
+                    <p v-else class="text-mist/50 text-[9px] sm:text-[10px] mt-0.5">Upload receipt below to auto-fill</p>
                     <p v-if="paymentErrors.referenceNo" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.referenceNo }}</p>
                   </div>
                   <div>
@@ -777,11 +879,12 @@ onUnmounted(() => {
                 >
                   <template v-if="paymentReceipt">
                     <div class="relative w-full">
-                      <img
+                        <img
                         v-if="paymentReceipt.type.startsWith('image/')"
                         :src="receiptPreviewUrl"
                         alt="Receipt preview"
                         class="max-h-40 sm:max-h-48 mx-auto rounded-sm object-contain"
+                        decoding="async"
                       />
                       <div v-else class="flex items-center gap-2 justify-center py-4">
                         <span class="text-2xl">📄</span>
@@ -790,7 +893,7 @@ onUnmounted(() => {
                       <button
                         type="button"
                         class="absolute top-1 right-1 bg-onyx/80 text-mist hover:text-cream w-6 h-6 flex items-center justify-center rounded-full text-xs"
-                        @click.prevent="paymentReceipt = null; receiptPreviewUrl = ''"
+                        @click.prevent="paymentReceipt = null; receiptPreviewUrl = ''; paymentForm.referenceNo = ''; ocrMessage = ''"
                       >
                         ✕
                       </button>
@@ -801,7 +904,7 @@ onUnmounted(() => {
                     <svg class="w-8 h-8 sm:w-10 sm:h-10 text-mist/50 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                     </svg>
-                    <p class="text-cream text-[11px] sm:text-sm font-medium">Tap to upload receipt</p>
+                    <p class="text-cream text-[11px] sm:text-sm font-medium">Tap to upload your GCash/bank receipt</p>
                     <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">JPEG only — max 5MB</p>
                   </template>
                 </label>
@@ -821,6 +924,11 @@ onUnmounted(() => {
                 <textarea id="pay-notes" v-model="paymentForm.notes" rows="2" class="input-field resize-none" placeholder="Any additional info..." />
               </div>
 
+              <div class="absolute left-[-9999px]" aria-hidden="true">
+                <label for="pay-website">Website</label>
+                <input id="pay-website" v-model="paymentFormHoneypot" type="text" tabindex="-1" autocomplete="off" />
+              </div>
+
               <button type="submit" class="btn-primary w-full py-3" :disabled="paymentSubmitting">
                 <span v-if="paymentSubmitting" class="inline-flex items-center gap-2">
                   <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
@@ -831,13 +939,6 @@ onUnmounted(() => {
                 </span>
                 <span v-else>Submit Payment</span>
               </button>
-
-              <p v-if="paymentSuccess" class="text-green-400 text-[11px] sm:text-sm text-center">
-                ✓ Payment submitted! A certification email has been sent to your email address.
-              </p>
-              <p v-if="paymentErrors.submit" class="text-red-400 text-[11px] sm:text-sm text-center">
-                {{ paymentErrors.submit }}
-              </p>
             </form>
           </div>
 
@@ -863,7 +964,7 @@ onUnmounted(() => {
                 </div>
                 <div>
                   <label for="walk-phone" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Phone *</label>
-                  <input id="walk-phone" v-model="walkinForm.phone" type="tel" class="input-field" maxlength="13" placeholder="09XXXXXXXXX" />
+                  <input id="walk-phone" v-model="walkinForm.phone" type="tel" class="input-field" maxlength="13" placeholder="+639XXXXXXXXX" @blur="walkinForm.phone = formatPhone(walkinForm.phone)" />
                   <p v-if="walkinErrors.phone" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ walkinErrors.phone }}</p>
                 </div>
               </div>
@@ -890,6 +991,11 @@ onUnmounted(() => {
               </label>
               <p v-if="walkinErrors.waiver" class="text-red-400 text-[10px] sm:text-xs">{{ walkinErrors.waiver }}</p>
 
+              <div class="absolute left-[-9999px]" aria-hidden="true">
+                <label for="walk-website">Website</label>
+                <input id="walk-website" v-model="walkinFormHoneypot" type="text" tabindex="-1" autocomplete="off" />
+              </div>
+
               <button type="submit" class="btn-primary w-full" :disabled="walkinSubmitting">
                 <span v-if="walkinSubmitting" class="inline-flex items-center gap-2">
                   <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
@@ -900,8 +1006,6 @@ onUnmounted(() => {
                 </span>
                 <span v-else>Register Walk-in</span>
               </button>
-
-              <p v-if="walkinSubmitError" class="text-red-400 text-[11px] sm:text-sm text-center">{{ walkinSubmitError }}</p>
             </form>
 
             <div v-else class="text-center space-y-3 sm:space-y-6 py-3 sm:py-4">
@@ -915,7 +1019,7 @@ onUnmounted(() => {
                 </p>
               </div>
               <div v-if="walkinQrDataUrl" class="inline-block p-2.5 sm:p-4 bg-cream rounded-sm">
-                <img :src="walkinQrDataUrl" alt="Permanent walk-in QR code" class="w-44 h-44 sm:w-60 sm:h-60" />
+                <img :src="walkinQrDataUrl" alt="Permanent walk-in QR code" class="w-44 h-44 sm:w-60 sm:h-60" width="240" height="240" decoding="async" />
               </div>
               <div>
                 <p class="text-mist text-[9px] sm:text-xs uppercase tracking-wider mb-0.5 sm:mb-1">Permanent Pass Code</p>
@@ -1121,10 +1225,56 @@ onUnmounted(() => {
 
         <div class="border-t border-iron pt-5 sm:pt-8 flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-4 text-mist text-[9px] sm:text-xs">
           <p>&copy; {{ new Date().getFullYear() }} OASIS FITNESS GYM. All rights reserved.</p>
-          <p>Calauan, Laguna, Philippines</p>
+          <div class="flex items-center gap-3 sm:gap-4">
+            <p>Calauan, Laguna, Philippines</p>
+            <span class="text-iron">|</span>
+            <NuxtLink to="/staff" class="text-mist hover:text-gold transition-colors">Are you a staff/admin?</NuxtLink>
+          </div>
         </div>
       </div>
     </footer>
+
+    <!-- Promo Modal -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="showPromo" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" @click.self="dismissPromo">
+          <div class="relative bg-graphite border border-iron max-w-md w-full p-6 sm:p-8 text-center">
+            <button
+              type="button"
+              class="absolute top-3 right-3 text-mist hover:text-cream text-xl leading-none"
+              @click="dismissPromo"
+            >
+              &times;
+            </button>
+            <p class="text-gold text-[10px] sm:text-xs uppercase tracking-[4px] mb-3">Limited Offer</p>
+            <h2 class="font-display text-2xl sm:text-3xl text-cream tracking-wide mb-2">Join OASIS Fitness Gym</h2>
+            <p class="text-mist text-sm sm:text-base mb-4">Get your permanent QR pass and start your fitness journey today. Walk-in daily or subscribe to a membership plan.</p>
+            <div class="flex flex-col gap-2 mb-4">
+              <div class="flex justify-between text-xs sm:text-sm">
+                <span class="text-mist">Daily Walk-in</span>
+                <span class="text-gold font-display">₱65 /visit</span>
+              </div>
+              <div class="flex justify-between text-xs sm:text-sm">
+                <span class="text-mist">Weekly Plan</span>
+                <span class="text-gold font-display">₱599 /week</span>
+              </div>
+              <div class="flex justify-between text-xs sm:text-sm">
+                <span class="text-mist">Monthly Plan</span>
+                <span class="text-gold font-display">₱1,499 /month</span>
+              </div>
+            </div>
+            <a
+              href="#register"
+              class="btn-primary inline-block w-full text-center text-sm sm:text-base py-3"
+              @click="dismissPromo"
+            >
+              Register Now
+            </a>
+            <p class="text-mist text-[9px] sm:text-[10px] mt-3">Open 7 days a week — Calauan, Laguna</p>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- Scroll to Top -->
     <button

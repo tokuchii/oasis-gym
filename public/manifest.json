@@ -1,0 +1,11 @@
+{
+  "name": "OASIS FITNESS GYM",
+  "short_name": "OASIS FIT",
+  "start_url": "/staff",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

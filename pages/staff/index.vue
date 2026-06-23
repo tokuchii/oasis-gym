@@ -2,6 +2,15 @@
 import { Html5Qrcode } from 'html5-qrcode'
 import { WALKIN_DEFAULT_FEE } from '~/types/walkin'
 import { generateWalkinQrDataUrl } from '~/composables/useWalkinPass'
+import { useToast } from '~/composables/useToast'
+import { useCachedFetch } from '~/composables/useCachedFetch'
+import { useOnlineStatus } from '~/composables/useOnlineStatus'
+import { useOfflineDb } from '~/composables/useOfflineDb'
+
+const toast = useToast()
+const { cachedGet, cachedPost } = useCachedFetch()
+const { isOnline } = useOnlineStatus()
+const { put: dbPut, get: dbGet } = useOfflineDb()
 
 useHead({ title: 'Staff Dashboard — OASIS FITNESS GYM' })
 
@@ -32,6 +41,7 @@ interface ReportVisit {
   id: string
   passCode: string
   fullName: string
+  email: string
   phone: string
   visitDate: string
   status: string
@@ -64,7 +74,8 @@ const loginPassword = ref('')
 const loginError = ref('')
 const loginSubmitting = ref(false)
 
-const activeTab = ref<'checkout' | 'walkin' | 'membership' | 'reports' | 'coaches' | 'management' | 'leaderboard'>('checkout')
+const activeTab = ref<'reports' | 'checkout' | 'walkin' | 'payment' | 'coaches' | 
+'membership' | 'leaderboard'>('reports')
 
 const walkinForm = reactive({
   fullName: '',
@@ -77,8 +88,10 @@ const walkinMessage = ref('')
 const walkinError = ref('')
 const walkinPassCode = ref('')
 const walkinQrDataUrl = ref('')
+const walkinFormHoneypot = ref('')
 
 const scannerActive = ref(false)
+const qrScanCooldown = ref(false)
 
 const searchMode = ref<'code' | 'phone' | 'name'>('code')
 const searchQuery = ref('')
@@ -103,17 +116,15 @@ const reminderError = ref('')
 
 async function sendReminders() {
   reminderLoading.value = true
-  reminderMessage.value = ''
-  reminderError.value = ''
 
   try {
     const data = await $fetch<{ message: string; sent: number; failed: number }>('/api/membership/send-reminders', {
       method: 'POST',
     })
-    reminderMessage.value = data.message
+    toast.success(data.message)
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
-    reminderError.value = fetchErr.data?.statusMessage ?? 'Failed to send reminders.'
+    toast.error(fetchErr.data?.statusMessage ?? 'Failed to send reminders.')
   } finally {
     reminderLoading.value = false
   }
@@ -131,6 +142,9 @@ const coachForm = reactive({
   bio: '',
   photoUrl: '',
 })
+const coachPhotoFile = ref<File | null>(null)
+const coachPhotoPreview = ref('')
+const coachPhotoUploading = ref(false)
 
 const specialtyOptions = [
   'Strength Training',
@@ -182,6 +196,13 @@ const leaderboardStats = ref<LeaderboardStats | null>(null)
 const leaderboardLoading = ref(false)
 const leaderboardError = ref('')
 const leaderboardSearch = ref('')
+const overviewLoaded = ref(false)
+const showOverviewCoaches = ref(false)
+const showOverviewClients = ref(false)
+const showOverviewLeaderboard = ref(false)
+const showAllCoaches = ref(false)
+const showAllClients = ref(false)
+const showAllLeaderboard = ref(false)
 
 const filteredLeaderboard = computed(() => {
   if (!leaderboardSearch.value.trim()) return leaderboardData.value
@@ -202,7 +223,9 @@ async function loadLeaderboard() {
   leaderboardError.value = ''
   leaderboardLoading.value = true
   try {
-    const data = await $fetch<{ leaderboard: LeaderboardEntry[]; stats: LeaderboardStats }>('/api/walkin/leaderboard')
+    const data = await cachedGet<{ leaderboard: LeaderboardEntry[]; stats: LeaderboardStats }>('/api/walkin/leaderboard', {
+      cache: { store: 'passes', label: 'Leaderboard' },
+    })
     leaderboardData.value = data.leaderboard
     leaderboardStats.value = data.stats
   } catch {
@@ -210,6 +233,12 @@ async function loadLeaderboard() {
   } finally {
     leaderboardLoading.value = false
   }
+}
+
+async function loadOverview() {
+  try {
+    await Promise.all([loadPayments(), loadCoaches(), loadClients(), loadLeaderboard()])
+  } catch {}
 }
 
 const filteredClients = computed(() => {
@@ -224,9 +253,13 @@ const clientForm = reactive({
   coachName: '',
   plan: '' as 'weekly' | 'monthly' | '',
 })
+const clientPaidAmountInput = ref('')
+const clientNoteInput = ref('')
+const clientActionLoading = ref('')
 
 const scannerRef = ref<HTMLElement | null>(null)
 let scanner: Html5Qrcode | null = null
+const qrUploadLoading = ref(false)
 
 const maxRevenue = computed(() => {
   if (!reportData.value?.chartData.length) return 1
@@ -243,8 +276,14 @@ async function checkSession() {
   try {
     const data = await $fetch<{ authenticated: boolean }>('/api/admin/session')
     authenticated.value = data.authenticated
+    await dbPut('meta', { key: 'session', authenticated: data.authenticated, cachedAt: Date.now() })
   } catch {
-    authenticated.value = false
+    const cached = await dbGet<{ authenticated: boolean; cachedAt: number }>('meta', 'session')
+    if (cached && Date.now() - cached.cachedAt < 8 * 60 * 60 * 1000) {
+      authenticated.value = cached.authenticated
+    } else {
+      authenticated.value = false
+    }
   } finally {
     checkingSession.value = false
   }
@@ -300,28 +339,117 @@ function stopScanner() {
   scannerActive.value = false
 }
 
+async function handleQrUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  if (!file) return
+  input.value = ''
+
+  if (qrScanCooldown.value || checkinLoading.value) {
+    searchError.value = 'Please wait a moment before scanning again.'
+    return
+  }
+
+  const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+  if (!allowed.includes(file.type)) {
+    searchError.value = 'Only JPEG, PNG, or WebP images are accepted.'
+    return
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    searchError.value = 'Image must be under 10MB.'
+    return
+  }
+
+  qrUploadLoading.value = true
+  searchError.value = ''
+  checkinMessage.value = ''
+  checkinError.value = ''
+
+  try {
+    const tempScanner = new Html5Qrcode('qr-upload-temp')
+    const decoded = await tempScanner.scanFile(file, true)
+    await tempScanner.clear()
+
+    const code = decoded.trim().toUpperCase()
+    if (!code) {
+      searchError.value = 'QR code is empty.'
+      return
+    }
+
+    qrScanCooldown.value = true
+    searchMode.value = 'code'
+    searchQuery.value = code
+    await runSearch()
+    const match = searchResults.value.find((p) => p.passCode === code)
+    if (match) {
+      selectedPass.value = match
+      if (match.status === 'checked_in') {
+        checkinMessage.value = `${match.fullName} is already checked out today.`
+      } else {
+        await checkIn(match.passCode, true)
+      }
+    } else {
+      searchError.value = 'No pass found for this QR code.'
+    }
+    setTimeout(() => { qrScanCooldown.value = false }, 5000)
+  } catch {
+    searchError.value = 'Could not read QR code from this image. Try a clearer photo.'
+  } finally {
+    qrUploadLoading.value = false
+  }
+}
+
+function formatPhone(phone: string): string {
+  const cleaned = phone.replace(/[\s\-()]/g, '')
+  if (!cleaned) return ''
+  if (cleaned.startsWith('+639') && cleaned.length === 13) return cleaned
+  if (cleaned.startsWith('639') && cleaned.length === 12) return '+' + cleaned
+  if (cleaned.startsWith('09') && cleaned.length === 11) return '+63' + cleaned.slice(1)
+  if (/^\d{10}$/.test(cleaned)) return '+63' + cleaned
+  return cleaned
+}
+
 async function submitWalkin() {
   walkinMessage.value = ''
   walkinError.value = ''
   walkinPassCode.value = ''
   walkinQrDataUrl.value = ''
 
-  if (!walkinForm.fullName.trim()) { walkinError.value = 'Full name is required.'; return }
-  if (!walkinForm.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(walkinForm.email)) { walkinError.value = 'Valid email is required.'; return }
-  if (!walkinForm.phone.trim()) { walkinError.value = 'Phone number is required.'; return }
-  if (!/^(09|\+639)\d{9}$/.test(walkinForm.phone.trim())) { walkinError.value = 'Phone must be a valid Philippine mobile number (09XXXXXXXXX).' ; return }
-  if (!walkinForm.emergencyContact.trim()) { walkinError.value = 'Emergency contact is required.'; return }
+  if (walkinFormHoneypot.value) return
+
+  const errors: string[] = []
+  const name = walkinForm.fullName.trim()
+  if (!name) errors.push('Full name is required.')
+  else if (name.length < 2) errors.push('Full name must be at least 2 characters.')
+  else if (name.length > 100) errors.push('Full name is too long.')
+
+  const email = walkinForm.email.trim()
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Valid email is required.')
+
+  const phone = walkinForm.phone.trim()
+  if (!phone) errors.push('Phone number is required.')
+  else if (!/^(\+639|09)\d{9}$/.test(phone)) errors.push('Phone must be a valid Philippine mobile number (+639XXXXXXXXX).')
+
+  const emergency = walkinForm.emergencyContact.trim()
+  if (!emergency) errors.push('Emergency contact is required.')
+  else if (emergency.length < 2) errors.push('Emergency contact must be at least 2 characters.')
+  else if (emergency.length > 100) errors.push('Emergency contact is too long.')
+
+  if (errors.length > 0) {
+    walkinError.value = errors.join(' ')
+    return
+  }
 
   walkinSubmitting.value = true
   try {
-    const data = await $fetch<{ passCode: string; qrPayload: string; message: string }>('/api/walkin/register', {
-      method: 'POST',
-      body: {
-        fullName: walkinForm.fullName,
-        email: walkinForm.email,
-        phone: walkinForm.phone,
-        emergencyContact: walkinForm.emergencyContact,
-      },
+    const data = await cachedPost<{ passCode: string; qrPayload: string; message: string }>('/api/walkin/register', {
+      fullName: walkinForm.fullName,
+      email: walkinForm.email,
+      phone: walkinForm.phone,
+      emergencyContact: walkinForm.emergencyContact,
+    }, {
+      label: `Register ${walkinForm.fullName}`,
+      cacheInvalidates: ['passes'],
     })
     walkinPassCode.value = data.passCode
     try {
@@ -336,7 +464,7 @@ async function submitWalkin() {
     walkinForm.emergencyContact = ''
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
-    walkinError.value = fetchErr.data?.statusMessage ?? 'Registration failed.'
+    toast.error(fetchErr.data?.statusMessage ?? 'Registration failed.')
   } finally {
     walkinSubmitting.value = false
   }
@@ -363,12 +491,24 @@ async function initScanner() {
       { facingMode: 'environment' },
       { fps: 10, qrbox: { width: 250, height: 250 } },
       async (decodedText) => {
+        if (qrScanCooldown.value || checkinLoading.value) return
+        qrScanCooldown.value = true
         const code = decodedText.trim().toUpperCase()
         searchMode.value = 'code'
         searchQuery.value = code
         await runSearch()
         const match = searchResults.value.find((p) => p.passCode === code)
-        if (match) selectPass(match)
+        if (match) {
+          selectedPass.value = match
+          if (match.status === 'checked_in') {
+            checkinMessage.value = `${match.fullName} is already checked out today.`
+          } else {
+            await checkIn(match.passCode, true)
+          }
+        } else {
+          searchError.value = 'No pass found for this QR code.'
+        }
+        setTimeout(() => { qrScanCooldown.value = false }, 5000)
       },
       () => {},
     )
@@ -388,6 +528,17 @@ async function runSearch() {
   checkinMessage.value = ''
   checkinError.value = ''
   selectedPass.value = null
+
+  const query = searchQuery.value.trim()
+  if (!query) {
+    searchError.value = 'Please enter a search term.'
+    return
+  }
+  if (query.length > 50) {
+    searchError.value = 'Search query is too long.'
+    return
+  }
+
   searchLoading.value = true
 
   try {
@@ -396,7 +547,10 @@ async function runSearch() {
     else if (searchMode.value === 'phone') params.phone = searchQuery.value
     else params.name = searchQuery.value
 
-    const data = await $fetch<{ results: PassResult[] }>('/api/walkin/lookup', { params })
+    const data = await cachedGet<{ results: PassResult[] }>('/api/walkin/lookup', {
+      params,
+      cache: { store: 'passes', label: 'Walk-in lookup' },
+    })
     searchResults.value = data.results
     if (data.results.length === 0) {
       searchError.value = 'No passes found.'
@@ -417,23 +571,33 @@ function selectPass(pass: PassResult) {
   checkinPaymentAmount.value = WALKIN_DEFAULT_FEE
 }
 
-async function checkIn(passCode: string) {
-  if (!window.confirm('Check out this guest?')) return
+async function checkIn(passCode: string, auto = false) {
+  if (!auto) {
+    toast.info('Processing checkout...')
+  }
   checkinLoading.value = true
   checkinMessage.value = ''
   checkinError.value = ''
 
   try {
-    const data = await $fetch<{ pass: PassResult; message: string }>('/api/walkin/checkout', {
-      method: 'POST',
-      body: { passCode, paymentAmount: checkinPaymentAmount.value },
+    const data = await cachedPost<{ pass: PassResult; message: string }>('/api/walkin/checkout', {
+      passCode, paymentAmount: checkinPaymentAmount.value,
+    }, {
+      label: `Checkout ${passCode}`,
+      cacheInvalidates: ['passes', 'reports'],
     })
     checkinMessage.value = data.message
+    toast.success(data.message)
     selectedPass.value = data.pass
     await runSearch()
   } catch (err: unknown) {
-    const fetchErr = err as { data?: { statusMessage?: string } }
-    checkinError.value = fetchErr.data?.statusMessage ?? 'Check-out failed.'
+    if (String(err).includes('Queued')) {
+      checkinMessage.value = 'Checkout queued — will sync when back online.'
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      checkinError.value = fetchErr.data?.statusMessage ?? 'Check-out failed.'
+      toast.error(fetchErr.data?.statusMessage ?? 'Check-out failed.')
+    }
   } finally {
     checkinLoading.value = false
   }
@@ -450,7 +614,9 @@ interface MembershipPayment {
   referenceNo: string | null
   amount: number
   receiptUrl: string | null
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'partial' | 'approved' | 'rejected'
+  note: string | null
+  paidAmount: number | null
   expiryDate: string | null
   createdAt: string
 }
@@ -458,7 +624,9 @@ interface MembershipPayment {
 interface PaymentSummary {
   total: number
   pending: number
+  partial: number
   approved: number
+  history: number
   rejected: number
   totalRevenue: number
 }
@@ -467,9 +635,13 @@ const paymentsList = ref<MembershipPayment[]>([])
 const paymentsSummary = ref<PaymentSummary | null>(null)
 const paymentsLoading = ref(false)
 const paymentsError = ref('')
-const paymentsStatusFilter = ref('')
+const paymentsStatusFilter = ref('pending')
 const paymentsCoachFilter = ref('')
 const paymentActionLoading = ref('')
+const paymentNoteInput = ref('')
+const paymentPaidAmountInput = ref('')
+const paymentPartialAmountInput = ref('')
+const paymentPartialNoteInput = ref('')
 const receiptModalUrl = ref('')
 const receiptModalName = ref('')
 const receiptModalLoading = ref(false)
@@ -499,30 +671,126 @@ async function loadPayments() {
     const params: Record<string, string> = {}
     if (paymentsStatusFilter.value) params.status = paymentsStatusFilter.value
     if (paymentsCoachFilter.value) params.coach = paymentsCoachFilter.value
-    const data = await $fetch<{ payments: MembershipPayment[]; summary: PaymentSummary }>('/api/membership/list', { params })
+    const data = await cachedGet<{ payments: MembershipPayment[]; summary: PaymentSummary }>('/api/membership/list', {
+      params,
+      cache: { store: 'clients', label: 'Payments' },
+    })
     paymentsList.value = data.payments
     paymentsSummary.value = data.summary
   } catch {
-    paymentsError.value = 'Failed to load payments.'
+    if (isOnline.value) toast.error('Failed to load payments.')
   } finally {
     paymentsLoading.value = false
   }
 }
 
-async function updatePaymentStatus(id: string, status: 'approved' | 'rejected') {
-  const label = status === 'approved' ? 'Approve' : 'Reject'
-  if (!window.confirm(`${label} this payment?`)) return
+async function updatePaymentStatus(id: string, status: 'approved' | 'rejected' | 'partial') {
+  const label = status === 'approved' ? 'Approve' : status === 'partial' ? 'Mark Partial' : 'Reject'
 
   paymentActionLoading.value = id
   try {
-    await $fetch('/api/membership/update-status', {
-      method: 'POST',
-      body: { id, status },
+    const body: Record<string, unknown> = { id, status, note: paymentNoteInput.value.trim() || null }
+    if (status === 'partial') {
+      const paid = parseFloat(paymentPaidAmountInput.value)
+      if (!isNaN(paid) && paid > 0) body.paidAmount = paid
+    }
+    await cachedPost('/api/membership/update-status', body, {
+      label: `${label} payment`,
+      cacheInvalidates: ['clients'],
     })
+    paymentNoteInput.value = ''
+    paymentPaidAmountInput.value = ''
     await loadPayments()
   } catch (err: unknown) {
-    const fetchErr = err as { data?: { statusMessage?: string } }
-    paymentsError.value = fetchErr.data?.statusMessage ?? `Failed to ${label.toLowerCase()} payment.`
+    if (String(err).includes('Queued')) {
+      toast.warning(`${label} queued — will sync when back online.`)
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      paymentsError.value = fetchErr.data?.statusMessage ?? `Failed to ${label.toLowerCase()} payment.`
+    }
+  } finally {
+    paymentActionLoading.value = ''
+  }
+}
+
+async function markPartialDone(payment: MembershipPayment) {
+  paymentActionLoading.value = payment.id
+  try {
+    await cachedPost('/api/membership/update-status', {
+      id: payment.id, status: 'approved', paidAmount: payment.amount, note: 'Remaining balance paid — fully settled.',
+    }, {
+      label: `Mark ${payment.fullName} done`,
+      cacheInvalidates: ['clients'],
+    })
+    toast.success(`${payment.fullName}'s payment marked as fully paid.`)
+    await loadPayments()
+  } catch (err: unknown) {
+    if (String(err).includes('Queued')) {
+      toast.warning('Mark done queued — will sync when back online.')
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      paymentsError.value = fetchErr.data?.statusMessage ?? 'Failed to mark as done.'
+      toast.error(fetchErr.data?.statusMessage ?? 'Failed to mark as done.')
+    }
+  } finally {
+    paymentActionLoading.value = ''
+  }
+}
+
+async function addPartialPayment(payment: MembershipPayment) {
+  const addAmount = parseFloat(paymentPartialAmountInput.value)
+  if (!addAmount || isNaN(addAmount) || addAmount <= 0) {
+    toast.error('Enter a valid amount to add.')
+    return
+  }
+  paymentActionLoading.value = payment.id
+  try {
+    const result = await cachedPost<{ message: string; overpayment: number }>('/api/membership/add-partial', {
+      id: payment.id, addAmount, note: paymentPartialNoteInput.value.trim() || null,
+    }, {
+      label: `Add ₱${addAmount} to ${payment.fullName}`,
+      cacheInvalidates: ['clients'],
+    })
+    if (result.overpayment > 0) {
+      toast.success(`₱${addAmount.toLocaleString()} added. ₱${result.overpayment.toLocaleString()} overpaid — ready for approval.`)
+    } else {
+      toast.success(result.message)
+    }
+    paymentPartialAmountInput.value = ''
+    paymentPartialNoteInput.value = ''
+    await loadPayments()
+  } catch (err: unknown) {
+    if (String(err).includes('Queued')) {
+      toast.warning('Payment queued — will sync when back online.')
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      paymentsError.value = fetchErr.data?.statusMessage ?? 'Failed to add payment.'
+      toast.error(fetchErr.data?.statusMessage ?? 'Failed to add payment.')
+    }
+  } finally {
+    paymentActionLoading.value = ''
+  }
+}
+
+async function approvePartialPayment(payment: MembershipPayment) {
+  paymentActionLoading.value = payment.id
+  try {
+    await cachedPost('/api/membership/update-status', {
+      id: payment.id, status: 'approved', paidAmount: payment.paidAmount, note: 'Fully settled — approved.',
+    }, {
+      label: `Approve ${payment.fullName}`,
+      cacheInvalidates: ['clients'],
+    })
+    toast.success(`${payment.fullName}'s payment approved.`)
+    await loadPayments()
+  } catch (err: unknown) {
+    if (String(err).includes('Queued')) {
+      toast.warning('Approval queued — will sync when back online.')
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      paymentsError.value = fetchErr.data?.statusMessage ?? 'Failed to approve payment.'
+      toast.error(fetchErr.data?.statusMessage ?? 'Failed to approve payment.')
+    }
   } finally {
     paymentActionLoading.value = ''
   }
@@ -535,25 +803,28 @@ async function loadReports() {
   visitLogLimit.value = 5
 
   try {
-    const data = await $fetch<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[] }>('/api/staff/reports', {
+    const data = await cachedGet<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[] }>('/api/staff/reports', {
       params: { period: reportPeriod.value },
+      cache: { store: 'reports', label: 'Reports' },
     })
     reportData.value = data
-  } catch (err: unknown) {
-    const fetchErr = err as { data?: { statusMessage?: string } }
-    reportError.value = fetchErr.data?.statusMessage ?? 'Failed to load reports.'
+  } catch {
+    if (isOnline.value) toast.error('Failed to load reports.')
   } finally {
     reportLoading.value = false
+    loadOverview()
   }
 }
 
 async function loadCoaches() {
   coachError.value = ''
   try {
-    const data = await $fetch<{ coaches: CoachItem[] }>('/api/coaches/list')
+    const data = await cachedGet<{ coaches: CoachItem[] }>('/api/coaches/list', {
+      cache: { store: 'coaches', label: 'Coaches' },
+    })
     coachesList.value = data.coaches
   } catch {
-    coachError.value = 'Failed to load coaches.'
+    if (isOnline.value) toast.error('Failed to load coaches.')
   }
 }
 
@@ -562,8 +833,38 @@ function resetCoachForm() {
   coachForm.specialty = []
   coachForm.bio = ''
   coachForm.photoUrl = ''
+  coachPhotoFile.value = null
+  coachPhotoPreview.value = ''
   customSpecialty.value = ''
   editingCoach.value = null
+}
+
+function handleCoachPhotoChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  if (!file) { coachPhotoFile.value = null; coachPhotoPreview.value = ''; return }
+  const maxSize = 5 * 1024 * 1024
+  if (file.size > maxSize) { coachError.value = 'Photo must be under 5MB'; input.value = ''; return }
+  const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+  if (!allowed.includes(file.type)) { coachError.value = 'Only JPEG, PNG, or WebP images accepted'; input.value = ''; return }
+  coachError.value = ''
+  coachPhotoFile.value = file
+  coachPhotoPreview.value = URL.createObjectURL(file)
+}
+
+async function uploadCoachPhoto(): Promise<string | null> {
+  if (!coachPhotoFile.value) return coachForm.photoUrl || null
+  coachPhotoUploading.value = true
+  try {
+    const formData = new FormData()
+    formData.append('photo', coachPhotoFile.value)
+    const data = await $fetch<{ photoUrl: string }>('/api/coaches/upload-photo', { method: 'POST', body: formData })
+    return data.photoUrl
+  } catch {
+    return null
+  } finally {
+    coachPhotoUploading.value = false
+  }
 }
 
 function startEditCoach(coach: CoachItem) {
@@ -582,8 +883,17 @@ function startEditCoach(coach: CoachItem) {
 }
 
 async function addCoach() {
-  if (!coachForm.fullName.trim()) {
-    coachError.value = 'Full name is required.'
+  const errors: string[] = []
+  const name = coachForm.fullName.trim()
+  if (!name) errors.push('Full name is required.')
+  else if (name.length < 2) errors.push('Full name must be at least 2 characters.')
+  else if (name.length > 100) errors.push('Full name is too long.')
+
+  if (coachForm.bio.length > 500) errors.push('Bio is too long (max 500 characters).')
+  if (getSpecialtyString().length > 200) errors.push('Specialty is too long (max 200 characters).')
+
+  if (errors.length > 0) {
+    coachError.value = errors.join(' ')
     return
   }
 
@@ -592,21 +902,28 @@ async function addCoach() {
   coachLoading.value = true
 
   try {
-    const data = await $fetch<{ message: string }>('/api/coaches/create', {
-      method: 'POST',
-      body: {
-        fullName: coachForm.fullName,
-        specialty: getSpecialtyString(),
-        bio: coachForm.bio,
-        photoUrl: coachForm.photoUrl,
-      },
+    const photoUrl = await uploadCoachPhoto()
+    const data = await cachedPost<{ message: string }>('/api/coaches/create', {
+      fullName: coachForm.fullName,
+      specialty: getSpecialtyString(),
+      bio: coachForm.bio,
+      photoUrl: photoUrl ?? '',
+    }, {
+      label: `Add coach ${coachForm.fullName}`,
+      cacheInvalidates: ['coaches'],
     })
     coachSuccess.value = data.message
+    toast.success(data.message)
     resetCoachForm()
     await loadCoaches()
   } catch (err: unknown) {
-    const fetchErr = err as { data?: { statusMessage?: string } }
-    coachError.value = fetchErr.data?.statusMessage ?? 'Failed to add coach.'
+    if (String(err).includes('Queued')) {
+      toast.warning('Coach creation queued — will sync when back online.')
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      coachError.value = fetchErr.data?.statusMessage ?? 'Failed to add coach.'
+      toast.error(fetchErr.data?.statusMessage ?? 'Failed to add coach.')
+    }
   } finally {
     coachLoading.value = false
   }
@@ -614,8 +931,18 @@ async function addCoach() {
 
 async function updateCoach() {
   if (!editingCoach.value) return
-  if (!coachForm.fullName.trim()) {
-    coachError.value = 'Full name is required.'
+
+  const errors: string[] = []
+  const name = coachForm.fullName.trim()
+  if (!name) errors.push('Full name is required.')
+  else if (name.length < 2) errors.push('Full name must be at least 2 characters.')
+  else if (name.length > 100) errors.push('Full name is too long.')
+
+  if (coachForm.bio.length > 500) errors.push('Bio is too long (max 500 characters).')
+  if (getSpecialtyString().length > 200) errors.push('Specialty is too long (max 200 characters).')
+
+  if (errors.length > 0) {
+    coachError.value = errors.join(' ')
     return
   }
 
@@ -624,43 +951,61 @@ async function updateCoach() {
   coachLoading.value = true
 
   try {
-    const data = await $fetch<{ message: string }>('/api/coaches/update', {
-      method: 'POST',
-      body: {
-        id: editingCoach.value.id,
-        fullName: coachForm.fullName,
-        specialty: getSpecialtyString(),
-        bio: coachForm.bio,
-        photoUrl: coachForm.photoUrl,
-      },
+    const photoUrl = await uploadCoachPhoto()
+    const data = await cachedPost<{ message: string }>('/api/coaches/update', {
+      id: editingCoach.value.id,
+      fullName: coachForm.fullName,
+      specialty: getSpecialtyString(),
+      bio: coachForm.bio,
+      photoUrl: photoUrl ?? coachForm.photoUrl,
+    }, {
+      label: `Update coach ${coachForm.fullName}`,
+      cacheInvalidates: ['coaches'],
     })
     coachSuccess.value = data.message
+    toast.success(data.message)
     resetCoachForm()
     await loadCoaches()
   } catch (err: unknown) {
-    const fetchErr = err as { data?: { statusMessage?: string } }
-    coachError.value = fetchErr.data?.statusMessage ?? 'Failed to update coach.'
+    if (String(err).includes('Queued')) {
+      toast.warning('Coach update queued — will sync when back online.')
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      coachError.value = fetchErr.data?.statusMessage ?? 'Failed to update coach.'
+      toast.error(fetchErr.data?.statusMessage ?? 'Failed to update coach.')
+    }
   } finally {
     coachLoading.value = false
   }
 }
 
-async function deleteCoach(id: string, name: string) {
-  if (!window.confirm(`Remove ${name} from coaches?`)) return
+const coachConfirmDelete = ref('')
 
+async function deleteCoach(id: string, name: string) {
+  if (coachConfirmDelete.value !== id) {
+    coachConfirmDelete.value = id
+    setTimeout(() => { coachConfirmDelete.value = '' }, 5000)
+    return
+  }
+
+  coachConfirmDelete.value = ''
   coachError.value = ''
   coachSuccess.value = ''
 
   try {
-    await $fetch('/api/coaches/delete', {
-      method: 'POST',
-      body: { id },
+    await cachedPost('/api/coaches/delete', { id }, {
+      label: `Delete coach ${name}`,
+      cacheInvalidates: ['coaches'],
     })
-    coachSuccess.value = 'Coach removed.'
+    toast.success(`${name} removed from coaches.`)
     await loadCoaches()
   } catch (err: unknown) {
-    const fetchErr = err as { data?: { statusMessage?: string } }
-    coachError.value = fetchErr.data?.statusMessage ?? 'Failed to remove coach.'
+    if (String(err).includes('Queued')) {
+      toast.warning('Coach deletion queued — will sync when back online.')
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      toast.error(fetchErr.data?.statusMessage ?? 'Failed to remove coach.')
+    }
   }
 }
 
@@ -668,13 +1013,17 @@ async function loadClients() {
   clientError.value = ''
   try {
     const [clientsData, coachesData] = await Promise.all([
-      $fetch<{ clients: ClientSession[] }>('/api/clients/list'),
-      $fetch<{ coaches: CoachItem[] }>('/api/coaches/list'),
+      cachedGet<{ clients: ClientSession[] }>('/api/clients/list', {
+        cache: { store: 'clients', label: 'Clients' },
+      }),
+      cachedGet<{ coaches: CoachItem[] }>('/api/coaches/list', {
+        cache: { store: 'coaches', label: 'Coaches' },
+      }),
     ])
     clientsList.value = clientsData.clients
     coachesList.value = coachesData.coaches
   } catch {
-    clientError.value = 'Failed to load data.'
+    if (isOnline.value) clientError.value = 'Failed to load data.'
   }
 }
 
@@ -689,26 +1038,39 @@ async function addClient() {
   clientLoading.value = true
 
   try {
-    const data = await $fetch<{ message: string }>('/api/clients/create', {
-      method: 'POST',
-      body: {
-        clientName: clientForm.clientName,
-        clientEmail: clientForm.clientEmail,
-        clientPhone: clientForm.clientPhone,
-        coachName: clientForm.coachName,
-        plan: clientForm.plan,
-      },
+    const body: Record<string, unknown> = {
+      clientName: clientForm.clientName,
+      clientEmail: clientForm.clientEmail,
+      clientPhone: clientForm.clientPhone,
+      coachName: clientForm.coachName,
+      plan: clientForm.plan,
+    }
+    const paid = parseFloat(clientPaidAmountInput.value)
+    if (!isNaN(paid) && paid > 0) body.paidAmount = paid
+    if (clientNoteInput.value.trim()) body.note = clientNoteInput.value.trim()
+
+    const data = await cachedPost<{ message: string }>('/api/clients/create', body, {
+      label: `Add client ${clientForm.clientName}`,
+      cacheInvalidates: ['clients'],
     })
     clientSuccess.value = data.message
+    toast.success(data.message)
     clientForm.clientName = ''
     clientForm.clientEmail = ''
     clientForm.clientPhone = ''
     clientForm.coachName = ''
     clientForm.plan = ''
+    clientPaidAmountInput.value = ''
+    clientNoteInput.value = ''
     await loadClients()
   } catch (err: unknown) {
-    const fetchErr = err as { data?: { statusMessage?: string } }
-    clientError.value = fetchErr.data?.statusMessage ?? 'Failed to add client.'
+    if (String(err).includes('Queued')) {
+      toast.warning('Client creation queued — will sync when back online.')
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      clientError.value = fetchErr.data?.statusMessage ?? 'Failed to add client.'
+      toast.error(fetchErr.data?.statusMessage ?? 'Failed to add client.')
+    }
   } finally {
     clientLoading.value = false
   }
@@ -718,30 +1080,80 @@ async function toggleSession(clientId: string, action: 'add_session' | 'remove_s
   clientError.value = ''
 
   try {
-    await $fetch('/api/clients/update', {
-      method: 'POST',
-      body: { id: clientId, action },
+    await cachedPost('/api/clients/update', { id: clientId, action }, {
+      label: `${action === 'add_session' ? 'Add' : 'Remove'} session`,
+      cacheInvalidates: ['clients'],
     })
     await loadClients()
   } catch (err: unknown) {
-    const fetchErr = err as { data?: { statusMessage?: string } }
-    clientError.value = fetchErr.data?.statusMessage ?? 'Failed to update session.'
+    if (String(err).includes('Queued')) {
+      toast.warning('Session update queued — will sync when back online.')
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      clientError.value = fetchErr.data?.statusMessage ?? 'Failed to update session.'
+    }
   }
 }
 
-async function deleteClient(id: string, name: string) {
-  if (!window.confirm(`Remove ${name} from clients?`)) return
+async function updateClientPayment(clientId: string) {
+  clientActionLoading.value = clientId
+  clientError.value = ''
 
+  try {
+    const paid = parseFloat(clientPaidAmountInput.value)
+    const body: Record<string, unknown> = { id: clientId, action: 'update_payment' }
+    if (!isNaN(paid) && paid > 0) body.paidAmount = paid
+    if (clientNoteInput.value.trim()) body.note = clientNoteInput.value.trim()
+
+    const data = await cachedPost<{ message: string }>('/api/clients/update', body, {
+      label: `Update payment for ${clientId}`,
+      cacheInvalidates: ['clients'],
+    })
+    clientSuccess.value = data.message
+    toast.success(data.message)
+    clientPaidAmountInput.value = ''
+    clientNoteInput.value = ''
+    await loadClients()
+  } catch (err: unknown) {
+    if (String(err).includes('Queued')) {
+      toast.warning('Payment update queued — will sync when back online.')
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      clientError.value = fetchErr.data?.statusMessage ?? 'Failed to update payment.'
+      toast.error(fetchErr.data?.statusMessage ?? 'Failed to update payment.')
+    }
+  } finally {
+    clientActionLoading.value = ''
+  }
+}
+
+const clientConfirmDelete = ref('')
+
+async function deleteClient(id: string, name: string) {
+  if (clientConfirmDelete.value !== id) {
+    clientConfirmDelete.value = id
+    setTimeout(() => { clientConfirmDelete.value = '' }, 5000)
+    return
+  }
+
+  clientConfirmDelete.value = ''
   clientError.value = ''
   clientSuccess.value = ''
 
   try {
-    await $fetch('/api/clients/delete', { method: 'POST', body: { id } })
-    clientSuccess.value = 'Client removed.'
+    await cachedPost('/api/clients/delete', { id }, {
+      label: `Delete client ${name}`,
+      cacheInvalidates: ['clients'],
+    })
+    toast.success(`${name} removed from clients.`)
     await loadClients()
   } catch (err: unknown) {
-    const fetchErr = err as { data?: { statusMessage?: string } }
-    clientError.value = fetchErr.data?.statusMessage ?? 'Failed to remove client.'
+    if (String(err).includes('Queued')) {
+      toast.warning('Client deletion queued — will sync when back online.')
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      toast.error(fetchErr.data?.statusMessage ?? 'Failed to remove client.')
+    }
   }
 }
 
@@ -760,12 +1172,14 @@ function statusClass(status: string) {
 function exportReport() {
   if (!reportData.value) return
 
+  const esc = (s: string) => `"${(s ?? '').replace(/"/g, '""')}"`
   const rows: string[] = []
-  rows.push('Date,Name,Pass Code,Phone,Status,Amount')
+  rows.push('Date,Name,Email,Phone,Pass Code,Status,Amount,Checked In At')
   for (const v of reportData.value.visits) {
     const status = v.status === 'checked_in' ? 'Checked Out' : v.status === 'registered' ? 'Registered' : 'Expired'
     const amount = v.paymentAmount ? `₱${v.paymentAmount}` : '—'
-    rows.push(`"${v.visitDate}","${v.fullName}","${v.passCode}","${v.phone}","${status}","${amount}"`)
+    const checkinTime = v.checkedInAt ? new Date(v.checkedInAt).toLocaleString('en-PH', { timeZone: 'Asia/Manila' }) : '—'
+    rows.push([esc(v.visitDate), esc(v.fullName), esc(v.email), esc(v.phone), esc(v.passCode), esc(status), esc(amount), esc(checkinTime)].join(','))
   }
   rows.push('')
   rows.push('Summary')
@@ -777,18 +1191,22 @@ function exportReport() {
   rows.push(`Date From,${reportData.value.summary.dateFrom}`)
   rows.push(`Date To,${reportData.value.summary.dateTo}`)
 
-  const csv = rows.join('\n')
+  const csv = '\uFEFF' + rows.join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `oasis-report-${reportData.value.summary.dateFrom}-to-${reportData.value.summary.dateTo}.csv`
+  const periodLabel = reportData.value.summary.period === 'day' ? reportData.value.summary.dateFrom : `${reportData.value.summary.dateFrom}-to-${reportData.value.summary.dateTo}`
+  link.download = `oasis-visit-log-${periodLabel}.csv`
   link.click()
   URL.revokeObjectURL(url)
 }
 
 onMounted(async () => {
   await checkSession()
+  if (authenticated.value) {
+    loadReports()
+  }
 })
 
 onUnmounted(() => {
@@ -847,6 +1265,14 @@ onUnmounted(() => {
           <button
             type="button"
             class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
+            :class="activeTab === 'reports' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
+            @click="activeTab = 'reports'; loadReports()"
+          >
+            Reports
+          </button>
+          <button
+            type="button"
+            class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
             :class="activeTab === 'checkout' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
             @click="activeTab = 'checkout'"
           >
@@ -863,18 +1289,10 @@ onUnmounted(() => {
           <button
             type="button"
             class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
-            :class="activeTab === 'membership' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
-            @click="activeTab = 'membership'; loadPayments()"
+            :class="activeTab === 'payment' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
+            @click="activeTab = 'payment'; loadPayments()"
           >
-            Membership
-          </button>
-          <button
-            type="button"
-            class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
-            :class="activeTab === 'reports' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
-            @click="activeTab = 'reports'; loadReports()"
-          >
-            Reports
+            Payment
           </button>
           <button
             type="button"
@@ -887,10 +1305,10 @@ onUnmounted(() => {
           <button
             type="button"
             class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
-            :class="activeTab === 'management' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
-            @click="activeTab = 'management'; loadClients()"
+            :class="activeTab === 'membership' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
+            @click="activeTab = 'membership'; loadClients()"
           >
-            Management
+            Membership
           </button>
           <button
             type="button"
@@ -902,35 +1320,306 @@ onUnmounted(() => {
           </button>
         </div>
 
+        <!-- REPORTS TAB -->
+        <template v-if="activeTab === 'reports'">
+          <!-- Renewal Reminders -->
+          <section class="card p-4 sm:p-6 mb-4 sm:mb-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide">Membership Renewals</h2>
+                <p class="text-mist text-[10px] sm:text-xs mt-0.5">Send renewal reminders to members expiring within 3 days.</p>
+              </div>
+              <button
+                type="button"
+                class="btn-primary text-[10px] sm:text-xs px-3 sm:px-4 py-1.5 sm:py-2 shrink-0"
+                :disabled="reminderLoading"
+                @click="sendReminders()"
+              >
+                {{ reminderLoading ? 'Sending…' : 'Send Reminders' }}
+              </button>
+            </div>
+          </section>
+
+          <section class="card p-4 sm:p-6">
+            <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">Reports & Analytics</h2>
+
+            <div class="flex gap-1.5 sm:gap-2 mb-4 sm:mb-6 flex-wrap">
+              <button
+                type="button"
+                class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
+                :class="reportPeriod === 'day' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
+                @click="reportPeriod = 'day'; loadReports()"
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
+                :class="reportPeriod === 'week' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
+                @click="reportPeriod = 'week'; loadReports()"
+              >
+                This Week
+              </button>
+              <button
+                type="button"
+                class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
+                :class="reportPeriod === 'month' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
+                @click="reportPeriod = 'month'; loadReports()"
+              >
+                This Month
+              </button>
+              <button v-if="reportData" type="button" class="btn-outline px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs ml-auto" @click="exportReport">
+                Export CSV
+              </button>
+            </div>
+
+            <div v-if="reportLoading" class="text-center py-10">
+              <p class="text-mist text-xs sm:text-sm">Loading report…</p>
+            </div>
+
+            <template v-else-if="reportData">
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
+                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Total Visits</p>
+                  <p class="font-display text-2xl sm:text-3xl text-gold">{{ reportData.summary.totalVisits }}</p>
+                </div>
+                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Checked Out</p>
+                  <p class="font-display text-2xl sm:text-3xl text-green-400">{{ reportData.summary.checkedOut }}</p>
+                </div>
+                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Revenue</p>
+                  <p class="font-display text-2xl sm:text-3xl text-gold">₱{{ reportData.summary.totalRevenue.toLocaleString() }}</p>
+                </div>
+                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Unique Members</p>
+                  <p class="font-display text-2xl sm:text-3xl text-gold">{{ reportData.summary.uniqueMembers }}</p>
+                </div>
+              </div>
+
+              <p class="text-mist text-[10px] sm:text-xs mb-3 sm:mb-4">
+                {{ reportPeriod === 'day' ? 'Today' : reportPeriod === 'week' ? 'This Week' : 'This Month' }}: <span class="text-cream font-medium">{{ reportData.summary.dateFrom }}</span> — <span class="text-cream font-medium">{{ reportData.summary.dateTo }}</span>
+              </p>
+
+              <div v-if="reportData.chartData.length > 0 && reportData.chartData.some(p => p.visits > 0)" class="mb-4 sm:mb-6">
+                <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">
+                  {{ reportPeriod === 'day' ? 'Today' : reportPeriod === 'week' ? 'This Week' : 'This Month' }} — Revenue
+                </h3>
+                <div class="overflow-x-auto">
+                  <div class="flex items-end gap-1 sm:gap-1.5 min-h-[160px] sm:min-h-[200px] px-2 pb-8">
+                    <div
+                      v-for="point in reportData.chartData"
+                      :key="point.date"
+                      class="flex-1 flex flex-col items-center gap-1 min-w-[28px] sm:min-w-[36px]"
+                    >
+                      <span v-if="point.revenue > 0" class="text-[8px] sm:text-[10px] text-gold font-semibold">₱{{ point.revenue }}</span>
+                      <div
+                        class="w-full rounded-t transition-all"
+                        :class="point.revenue > 0 ? 'bg-gold' : 'bg-iron/30'"
+                        :style="{ height: point.revenue > 0 ? `${Math.max((point.revenue / maxRevenue) * 100, 12)}%` : '4px' }"
+                      />
+                      <span class="text-[8px] sm:text-[10px] text-mist font-medium">{{ point.label }}</span>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2 mt-1 justify-center">
+                    <div class="w-3 h-3 bg-gold rounded-sm" />
+                    <span class="text-[9px] sm:text-[10px] text-mist">Revenue (₱65/check-out)</span>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="reportData.visits.length > 0">
+                <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">
+                  Visit Log <span class="text-mist text-xs sm:text-sm font-body">({{ reportData.visits.length }} total)</span>
+                </h3>
+                <div class="overflow-x-auto">
+                  <table class="w-full text-[10px] sm:text-xs min-w-[450px]">
+                    <thead>
+                      <tr class="border-b border-iron">
+                        <th class="text-left p-2 sm:p-3 text-gold font-display tracking-wide">Date</th>
+                        <th class="text-left p-2 sm:p-3 text-gold font-display tracking-wide">Name</th>
+                        <th class="text-left p-2 sm:p-3 text-gold font-display tracking-wide">Pass Code</th>
+                        <th class="text-right p-2 sm:p-3 text-gold font-display tracking-wide">Amount</th>
+                        <th class="text-left p-2 sm:p-3 text-gold font-display tracking-wide">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="v in reportData.visits.slice(0, visitLogLimit)" :key="v.id" class="border-b border-iron/50 last:border-0">
+                        <td class="p-2 sm:p-3 text-cream whitespace-nowrap">{{ v.visitDate }}</td>
+                        <td class="p-2 sm:p-3 text-cream">{{ v.fullName }}</td>
+                        <td class="p-2 sm:p-3 text-gold font-display tracking-wider">{{ v.passCode }}</td>
+                        <td class="p-2 sm:p-3 text-cream text-right">{{ v.paymentAmount ? `₱${v.paymentAmount}` : '—' }}</td>
+                        <td class="p-2 sm:p-3">
+                          <span :class="statusClass(v.status)">{{ statusLabel(v.status) }}</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-if="reportData.visits.length > visitLogLimit" class="text-center mt-3">
+                  <button type="button" class="text-gold text-[11px] sm:text-xs uppercase tracking-wider hover:underline" @click="visitLogLimit += 5">
+                    Show More ({{ reportData.visits.length - visitLogLimit }} remaining)
+                  </button>
+                </div>
+                <div v-if="visitLogLimit > 5 && reportData.visits.length > 5" class="text-center mt-2">
+                  <button type="button" class="text-mist text-[10px] sm:text-[11px] uppercase tracking-wider hover:text-cream" @click="visitLogLimit = 5">
+                    Show Less
+                  </button>
+                </div>
+              </div>
+
+              <div v-else class="text-center py-6">
+                <p class="text-mist text-xs sm:text-sm">No visits found for this period.</p>
+              </div>
+            </template>
+
+            <div v-else class="text-center py-10">
+              <p class="text-mist text-xs sm:text-sm">Select a period above to view the report.</p>
+            </div>
+
+            <!-- Overview Section -->
+            <div class="mt-6 sm:mt-8 border-t border-iron pt-6 sm:pt-8">
+              <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-4 sm:mb-6">Overview</h2>
+
+              <!-- Membership Summary -->
+              <div v-if="paymentsSummary" class="mb-6">
+                <div class="flex items-center justify-between mb-3">
+                  <h3 class="font-display text-sm sm:text-base text-gold tracking-wide">Payment</h3>
+                  <span class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">{{ paymentsSummary.total }} total</span>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3">
+                  <div class="bg-graphite border border-iron p-2.5 sm:p-3 text-center">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase">Pending</p>
+                    <p class="font-display text-lg sm:text-xl text-yellow-400">{{ paymentsSummary.pending }}</p>
+                  </div>
+                  <div class="bg-graphite border border-iron p-2.5 sm:p-3 text-center">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase">Partial</p>
+                    <p class="font-display text-lg sm:text-xl text-orange-400">{{ paymentsSummary.partial }}</p>
+                  </div>
+                  <div class="bg-graphite border border-iron p-2.5 sm:p-3 text-center">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase">Approved</p>
+                    <p class="font-display text-lg sm:text-xl text-green-400">{{ paymentsSummary.approved }}</p>
+                  </div>
+                  <div class="bg-graphite border border-iron p-2.5 sm:p-3 text-center">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase">History</p>
+                    <p class="font-display text-lg sm:text-xl text-purple-400">{{ paymentsSummary.history }}</p>
+                  </div>
+                  <div class="bg-graphite border border-iron p-2.5 sm:p-3 text-center">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase">Revenue</p>
+                    <p class="font-display text-lg sm:text-xl text-gold">₱{{ paymentsSummary.totalRevenue.toLocaleString() }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Coaches -->
+              <div class="mb-6">
+                <div class="flex items-center justify-between mb-3">
+                  <h3 class="font-display text-sm sm:text-base text-gold tracking-wide">Coaches</h3>
+                  <span v-if="coachesList.length > 0" class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">{{ coachesList.length }} active</span>
+                </div>
+                <div v-if="coachesList.length > 0" class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                  <div v-for="coach in coachesList.slice(0, showAllCoaches ? coachesList.length : 4)" :key="coach.id" class="bg-graphite border border-iron p-2.5 sm:p-3 flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-full overflow-hidden bg-graphite border border-iron flex items-center justify-center shrink-0">
+                      <img v-if="coach.photoUrl" :src="coach.photoUrl" class="w-full h-full object-cover" loading="lazy" decoding="async" width="32" height="32" />
+                      <span v-else class="text-gold text-xs font-display">{{ coach.fullName.charAt(0) }}</span>
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-cream text-[10px] sm:text-xs truncate">{{ coach.fullName }}</p>
+                      <p v-if="coach.specialty" class="text-mist text-[8px] sm:text-[9px] truncate">{{ coach.specialty }}</p>
+                    </div>
+                  </div>
+                </div>
+                <button v-if="coachesList.length > 4" type="button" class="text-gold text-[9px] sm:text-[10px] uppercase tracking-wider hover:underline mt-2" @click="showAllCoaches = !showAllCoaches">
+                  {{ showAllCoaches ? 'Show Less' : `Show All (${coachesList.length})` }}
+                </button>
+                <p v-if="coachesList.length === 0" class="text-mist text-[10px] sm:text-xs">No coaches added yet.</p>
+              </div>
+
+              <!-- Clients -->
+              <div class="mb-6">
+                <div class="flex items-center justify-between mb-3">
+                  <h3 class="font-display text-sm sm:text-base text-gold tracking-wide">Clients</h3>
+                  <span v-if="clientsList.length > 0" class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">{{ clientsList.length }} active</span>
+                </div>
+                <div v-if="clientsList.length > 0" class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                  <div v-for="client in clientsList.slice(0, showAllClients ? clientsList.length : 4)" :key="client.id" class="bg-graphite border border-iron p-2.5 sm:p-3">
+                    <p class="text-cream text-[10px] sm:text-xs truncate">{{ client.client_name }}</p>
+                    <div class="flex items-center gap-1.5 mt-1">
+                      <span class="text-[8px] sm:text-[9px] px-1 py-0.5 bg-gold/10 text-gold uppercase">{{ client.plan }}</span>
+                      <span class="text-[8px] sm:text-[9px] text-mist">{{ client.sessions_used }}/{{ client.total_sessions }}</span>
+                    </div>
+                  </div>
+                </div>
+                <button v-if="clientsList.length > 4" type="button" class="text-gold text-[9px] sm:text-[10px] uppercase tracking-wider hover:underline mt-2" @click="showAllClients = !showAllClients">
+                  {{ showAllClients ? 'Show Less' : `Show All (${clientsList.length})` }}
+                </button>
+                <p v-if="clientsList.length === 0" class="text-mist text-[10px] sm:text-xs">No clients yet.</p>
+              </div>
+
+              <!-- Leaderboard -->
+              <div>
+                <div class="flex items-center justify-between mb-3">
+                  <h3 class="font-display text-sm sm:text-base text-gold tracking-wide">Leaderboard</h3>
+                  <span v-if="leaderboardData.length > 0" class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">{{ leaderboardData.length }} ranked</span>
+                </div>
+                <div v-if="leaderboardData.length > 0" class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                  <div v-for="entry in leaderboardData.slice(0, showAllLeaderboard ? leaderboardData.length : 4)" :key="entry.id" class="bg-graphite border border-iron p-2.5 sm:p-3 flex items-center gap-2">
+                    <span class="text-base sm:text-lg shrink-0">{{ rankBadge(entry.rank) }}</span>
+                    <div class="min-w-0">
+                      <p class="text-cream text-[10px] sm:text-xs truncate">{{ entry.fullName }}</p>
+                      <p class="text-gold text-[8px] sm:text-[9px]">{{ entry.points }} pts · {{ entry.totalVisits }} visits</p>
+                    </div>
+                  </div>
+                </div>
+                <button v-if="leaderboardData.length > 4" type="button" class="text-gold text-[9px] sm:text-[10px] uppercase tracking-wider hover:underline mt-2" @click="showAllLeaderboard = !showAllLeaderboard">
+                  {{ showAllLeaderboard ? 'Show Less' : `Show All (${leaderboardData.length})` }}
+                </button>
+                <p v-if="leaderboardData.length === 0" class="text-mist text-[10px] sm:text-xs">No leaderboard data yet.</p>
+              </div>
+            </div>
+          </section>
+        </template>
+
         <!-- CHECK-OUT TAB -->
         <template v-if="activeTab === 'checkout'">
           <!-- QR Scanner -->
           <section class="card p-4 sm:p-6">
             <div class="flex items-center justify-between mb-3 sm:mb-4">
               <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide">Scan QR Code</h2>
-              <button
-                v-if="!scannerActive"
-                type="button"
-                class="btn-primary text-[10px] sm:text-xs px-3 py-1.5"
-                @click="startScanner"
-              >
-                Start Camera
-              </button>
-              <button
-                v-else
-                type="button"
-                class="btn-outline text-[10px] sm:text-xs px-3 py-1.5"
-                @click="stopScanner"
-              >
-                Stop Camera
-              </button>
+              <div class="flex gap-2">
+                <label
+                  for="qr-upload"
+                  class="btn-outline text-[10px] sm:text-xs px-3 py-1.5 cursor-pointer"
+                  :class="qrUploadLoading ? 'opacity-50 pointer-events-none' : ''"
+                >
+                  {{ qrUploadLoading ? 'Scanning...' : 'Upload QR' }}
+                </label>
+                <input id="qr-upload" type="file" accept="image/*" class="sr-only" @change="handleQrUpload" />
+                <button
+                  v-if="!scannerActive"
+                  type="button"
+                  class="btn-primary text-[10px] sm:text-xs px-3 py-1.5"
+                  @click="startScanner"
+                >
+                  Start Camera
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="btn-outline text-[10px] sm:text-xs px-3 py-1.5"
+                  @click="stopScanner"
+                >
+                  Stop Camera
+                </button>
+              </div>
             </div>
             <div v-if="scannerActive" ref="scannerRef">
               <div id="qr-reader" class="overflow-hidden rounded-sm" />
             </div>
             <p v-else class="text-mist text-[11px] sm:text-sm text-center py-4">
-              Tap "Start Camera" to scan a guest's QR code.
+              Tap "Start Camera" to scan, or "Upload QR" to pick an image.
             </p>
+            <div id="qr-upload-temp" class="hidden" />
           </section>
 
           <!-- Search -->
@@ -1055,9 +1744,6 @@ onUnmounted(() => {
             <p v-else class="text-green-400 text-xs sm:text-sm text-center">
               Already checked out today. Come back tomorrow for another session.
             </p>
-
-            <p v-if="checkinMessage" class="text-green-400 text-xs sm:text-sm text-center mt-3 sm:mt-4">{{ checkinMessage }}</p>
-            <p v-if="checkinError" class="text-red-400 text-xs sm:text-sm text-center mt-3 sm:mt-4">{{ checkinError }}</p>
           </section>
         </template>
 
@@ -1082,7 +1768,7 @@ onUnmounted(() => {
                   </div>
                   <div>
                     <label for="wi-phone" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Phone *</label>
-                    <input id="wi-phone" v-model="walkinForm.phone" type="tel" class="input-field" maxlength="11" placeholder="09XXXXXXXXX" />
+                    <input id="wi-phone" v-model="walkinForm.phone" type="tel" class="input-field" maxlength="13" placeholder="+639XXXXXXXXX" @blur="walkinForm.phone = formatPhone(walkinForm.phone)" />
                   </div>
                 </div>
                 <div>
@@ -1090,7 +1776,9 @@ onUnmounted(() => {
                   <input id="wi-emergency" v-model="walkinForm.emergencyContact" type="text" class="input-field" maxlength="100" placeholder="Name & phone number" />
                 </div>
 
-                <p v-if="walkinError" class="text-red-400 text-xs sm:text-sm">{{ walkinError }}</p>
+                <div class="absolute left-[-9999px]" aria-hidden="true">
+                  <input v-model="walkinFormHoneypot" type="text" tabindex="-1" autocomplete="off" />
+                </div>
 
                 <button type="submit" class="btn-primary w-full" :disabled="walkinSubmitting">
                   {{ walkinSubmitting ? 'Registering…' : 'Register Walk-in' }}
@@ -1107,7 +1795,7 @@ onUnmounted(() => {
                 <p class="text-green-400 text-xs sm:text-sm">{{ walkinMessage }}</p>
 
                 <div v-if="walkinQrDataUrl" class="inline-block p-2.5 sm:p-4 bg-cream rounded-sm">
-                  <img :src="walkinQrDataUrl" alt="Walk-in QR code" class="w-40 h-40 sm:w-52 sm:h-52" />
+                  <img :src="walkinQrDataUrl" alt="Walk-in QR code" class="w-40 h-40 sm:w-52 sm:h-52" width="208" height="208" decoding="async" />
                 </div>
 
                 <div>
@@ -1125,10 +1813,10 @@ onUnmounted(() => {
           </section>
         </template>
 
-        <!-- MEMBERSHIP TAB -->
-        <template v-if="activeTab === 'membership'">
+        <!-- PAYMENT TAB -->
+        <template v-if="activeTab === 'payment'">
           <!-- Summary Cards -->
-          <div v-if="paymentsSummary && !paymentsLoading" class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
+          <div v-if="paymentsSummary && !paymentsLoading" class="grid grid-cols-2 sm:grid-cols-6 gap-3 sm:gap-4 mb-4 sm:mb-6">
             <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
               <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Total</p>
               <p class="font-display text-2xl sm:text-3xl text-gold">{{ paymentsSummary.total }}</p>
@@ -1138,12 +1826,20 @@ onUnmounted(() => {
               <p class="font-display text-2xl sm:text-3xl text-yellow-400">{{ paymentsSummary.pending }}</p>
             </div>
             <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Partial</p>
+              <p class="font-display text-2xl sm:text-3xl text-orange-400">{{ paymentsSummary.partial }}</p>
+            </div>
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
               <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Approved</p>
               <p class="font-display text-2xl sm:text-3xl text-green-400">{{ paymentsSummary.approved }}</p>
             </div>
             <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
               <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Revenue</p>
               <p class="font-display text-2xl sm:text-3xl text-gold">₱{{ paymentsSummary.totalRevenue.toLocaleString() }}</p>
+            </div>
+            <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
+              <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">History</p>
+              <p class="font-display text-2xl sm:text-3xl text-purple-400">{{ paymentsSummary.history }}</p>
             </div>
           </div>
 
@@ -1184,6 +1880,14 @@ onUnmounted(() => {
               <button
                 type="button"
                 class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                :class="paymentsStatusFilter === 'partial' ? 'border-orange-400 text-orange-400 bg-orange-400/10' : 'border-iron text-mist hover:border-orange-400/50'"
+                @click="paymentsStatusFilter = 'partial'; loadPayments()"
+              >
+                Partial
+              </button>
+              <button
+                type="button"
+                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
                 :class="paymentsStatusFilter === 'approved' ? 'border-green-400 text-green-400 bg-green-400/10' : 'border-iron text-mist hover:border-green-400/50'"
                 @click="paymentsStatusFilter = 'approved'; loadPayments()"
               >
@@ -1197,9 +1901,15 @@ onUnmounted(() => {
               >
                 Rejected
               </button>
+              <button
+                type="button"
+                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                :class="paymentsStatusFilter === 'history' ? 'border-purple-400 text-purple-400 bg-purple-400/10' : 'border-iron text-mist hover:border-purple-400/50'"
+                @click="paymentsStatusFilter = 'history'; loadPayments()"
+              >
+                History
+              </button>
             </div>
-
-            <p v-if="paymentsError" class="text-red-400 text-xs sm:text-sm mb-3 sm:mb-4">{{ paymentsError }}</p>
 
             <div v-if="paymentsLoading" class="text-center py-12">
               <div class="inline-flex items-center gap-2 text-mist text-xs sm:text-sm">
@@ -1225,51 +1935,55 @@ onUnmounted(() => {
               >
                 <!-- Payment Header -->
                 <div class="flex items-center justify-between gap-3 p-3 sm:p-4 bg-graphite/50">
-                  <div class="flex items-center gap-3 min-w-0">
-                    <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
-                      <span class="text-gold font-display text-sm sm:text-base">{{ payment.fullName.charAt(0) }}</span>
-                    </div>
-                    <div class="min-w-0">
-                      <p class="text-cream font-medium text-sm sm:text-base truncate">{{ payment.fullName }}</p>
-                      <p class="text-mist text-[10px] sm:text-xs">{{ payment.phone }} · {{ payment.email }}</p>
-                    </div>
+                  <div class="min-w-0">
+                    <p class="text-cream font-medium text-sm sm:text-base truncate">{{ payment.fullName }}</p>
+                    <p class="text-mist text-[10px] sm:text-xs mt-0.5">{{ payment.phone }} · {{ payment.email }}</p>
                   </div>
                   <span
-                    class="text-[9px] sm:text-[10px] uppercase tracking-wider px-2 sm:px-2.5 py-0.5 sm:py-1 shrink-0 font-medium"
-                    :class="payment.status === 'approved' ? 'text-green-400 bg-green-400/10 border border-green-400/30' : payment.status === 'rejected' ? 'text-red-400 bg-red-400/10 border border-red-400/30' : 'text-yellow-400 bg-yellow-400/10 border border-yellow-400/30'"
+                    class="text-[9px] sm:text-[10px] uppercase tracking-wider px-2 sm:px-2.5 py-0.5 sm:py-1 shrink-0 font-medium rounded-sm"
+                    :class="payment.status === 'approved' ? 'text-green-400 bg-green-400/10 border border-green-400/30' : payment.status === 'rejected' ? 'text-red-400 bg-red-400/10 border border-red-400/30' : payment.status === 'partial' ? 'text-orange-400 bg-orange-400/10 border border-orange-400/30' : 'text-yellow-400 bg-yellow-400/10 border border-yellow-400/30'"
                   >
                     {{ payment.status }}
                   </span>
                 </div>
 
                 <!-- Payment Body -->
-                <div class="p-3 sm:p-4 space-y-2.5 sm:space-y-3">
-                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 text-[10px] sm:text-xs">
-                    <div>
-                      <span class="text-mist block">Plan</span>
+                <div class="p-3 sm:p-4 space-y-3 sm:space-y-4">
+
+                  <!-- Payment Details -->
+                  <div class="space-y-2">
+                    <div class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                      <span class="text-mist">Plan</span>
                       <span class="text-cream font-medium uppercase">{{ payment.plan }}</span>
                     </div>
-                    <div>
-                      <span class="text-mist block">Amount</span>
+                    <div class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                      <span class="text-mist">Amount</span>
                       <span class="text-gold font-display text-base sm:text-lg">₱{{ payment.amount.toLocaleString() }}</span>
                     </div>
-                    <div>
-                      <span class="text-mist block">Coach</span>
+                    <template v-if="payment.paidAmount != null && payment.status !== 'pending'">
+                      <div class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                        <span class="text-mist">Amount Paid</span>
+                        <span class="text-green-400 font-medium">₱{{ payment.paidAmount.toLocaleString() }}</span>
+                      </div>
+                      <div class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                        <span class="text-mist">Change</span>
+                        <span :class="payment.paidAmount > payment.amount ? 'text-yellow-400 font-medium' : 'text-cream'">₱{{ Math.max(0, payment.paidAmount - payment.amount).toLocaleString() }}</span>
+                      </div>
+                    </template>
+                    <div class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                      <span class="text-mist">Coach</span>
                       <span class="text-cream font-medium">{{ payment.coach ?? 'No preference' }}</span>
                     </div>
-                    <div>
-                      <span class="text-mist block">Payment</span>
+                    <div class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                      <span class="text-mist">Payment Method</span>
                       <span class="text-cream font-medium uppercase">{{ payment.paymentMethod }}</span>
                     </div>
-                  </div>
-
-                  <div class="grid grid-cols-2 gap-2 sm:gap-3 text-[10px] sm:text-xs">
-                    <div>
-                      <span class="text-mist block">Reference No.</span>
+                    <div class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                      <span class="text-mist">Reference No.</span>
                       <span class="text-cream font-medium">{{ payment.referenceNo ?? '—' }}</span>
                     </div>
-                    <div>
-                      <span class="text-mist block">Expiry</span>
+                    <div class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                      <span class="text-mist">Expiry</span>
                       <span class="text-cream font-medium">{{ payment.expiryDate ?? '—' }}</span>
                     </div>
                   </div>
@@ -1278,12 +1992,74 @@ onUnmounted(() => {
                     Submitted: {{ new Date(payment.createdAt).toLocaleString() }}
                   </div>
 
+                  <!-- Note -->
+                  <div v-if="payment.note" class="bg-gold/5 border border-gold/20 rounded-sm p-2.5 text-[10px] sm:text-xs">
+                    <span class="text-gold font-medium">Note:</span> <span class="text-cream">{{ payment.note }}</span>
+                  </div>
+
+                  <!-- Pending: Amount Input -->
+                  <div v-if="payment.status === 'pending'" class="space-y-2 pt-1">
+                    <div class="relative">
+                      <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gold text-[10px] sm:text-xs">₱</span>
+                      <input
+                        v-model="paymentPaidAmountInput"
+                        type="number"
+                        min="0"
+                        :max="payment.amount"
+                        step="0.01"
+                        class="input-field text-[11px] sm:text-xs py-2 pl-6"
+                        :placeholder="`Amount paid (of ₱${payment.amount.toLocaleString()})`"
+                      />
+                    </div>
+                    <input
+                      v-model="paymentNoteInput"
+                      type="text"
+                      class="input-field text-[11px] sm:text-xs py-2"
+                      placeholder="Add note (optional)"
+                      maxlength="200"
+                    />
+                  </div>
+
+                  <!-- Partial: Status & Input -->
+                  <div v-if="payment.status === 'partial'" class="space-y-2 pt-1">
+                    <div class="bg-orange-400/5 border border-orange-400/20 rounded-sm p-2.5 text-[10px] sm:text-xs">
+                      <template v-if="payment.paidAmount >= payment.amount">
+                        <span class="text-green-400 font-medium">Fully paid</span>
+                        <span class="text-mist"> — ₱{{ payment.paidAmount.toLocaleString() }} of ₱{{ payment.amount.toLocaleString() }}</span>
+                        <span v-if="payment.paidAmount > payment.amount" class="text-yellow-400 font-medium"> (₱{{ (payment.paidAmount - payment.amount).toLocaleString() }} change due)</span>
+                      </template>
+                      <template v-else>
+                        <span class="text-orange-400 font-medium">Partially paid</span>
+                        <span class="text-cream"> — ₱{{ (payment.paidAmount ?? 0).toLocaleString() }} of ₱{{ payment.amount.toLocaleString() }}</span>
+                        <span class="text-mist"> (₱{{ (payment.amount - (payment.paidAmount ?? 0)).toLocaleString() }} remaining)</span>
+                      </template>
+                    </div>
+                    <div class="relative">
+                      <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gold text-[10px] sm:text-xs">₱</span>
+                      <input
+                        v-model="paymentPartialAmountInput"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        class="input-field text-[11px] sm:text-xs py-2 pl-6"
+                        :placeholder="`Add amount (₱${(payment.amount - (payment.paidAmount ?? 0)).toLocaleString()} remaining)`"
+                      />
+                    </div>
+                    <input
+                      v-model="paymentPartialNoteInput"
+                      type="text"
+                      class="input-field text-[11px] sm:text-xs py-2"
+                      placeholder="Add note (optional)"
+                      maxlength="200"
+                    />
+                  </div>
+
                   <!-- Actions -->
                   <div class="flex gap-2 pt-1">
                     <button
                       v-if="payment.receiptUrl"
                       type="button"
-                      class="btn-outline flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2"
+                      class="btn-outline flex-1 text-[10px] sm:text-xs py-2 sm:py-2.5"
                       @click="openReceiptModal(payment.receiptUrl, payment.fullName)"
                     >
                       View Receipt
@@ -1291,7 +2067,7 @@ onUnmounted(() => {
                     <template v-if="payment.status === 'pending'">
                       <button
                         type="button"
-                        class="btn-primary flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2"
+                        class="btn-primary flex-1 text-[10px] sm:text-xs py-2 sm:py-2.5"
                         :disabled="paymentActionLoading === payment.id"
                         @click="updatePaymentStatus(payment.id, 'approved')"
                       >
@@ -1299,12 +2075,49 @@ onUnmounted(() => {
                       </button>
                       <button
                         type="button"
-                        class="btn-outline flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2 text-red-400 border-red-400/30 hover:border-red-400/50"
+                        class="btn-outline flex-1 text-[10px] sm:text-xs py-2 sm:py-2.5 text-orange-400 border-orange-400/30 hover:border-orange-400/50"
+                        :disabled="paymentActionLoading === payment.id"
+                        @click="updatePaymentStatus(payment.id, 'partial')"
+                      >
+                        Mark Partial
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-outline flex-1 text-[10px] sm:text-xs py-2 sm:py-2.5 text-red-400 border-red-400/30 hover:border-red-400/50"
                         :disabled="paymentActionLoading === payment.id"
                         @click="updatePaymentStatus(payment.id, 'rejected')"
-                    >
-                      Reject
-                    </button>
+                      >
+                        Reject
+                      </button>
+                    </template>
+                    <template v-if="payment.status === 'partial'">
+                      <button
+                        v-if="payment.paidAmount == null || payment.paidAmount < payment.amount"
+                        type="button"
+                        class="btn-outline flex-1 text-[10px] sm:text-xs py-2 sm:py-2.5 text-orange-400 border-orange-400/30 hover:border-orange-400/50"
+                        :disabled="paymentActionLoading === payment.id"
+                        @click="addPartialPayment(payment)"
+                      >
+                        {{ paymentActionLoading === payment.id ? 'Processing…' : 'Add Payment' }}
+                      </button>
+                      <button
+                        v-if="payment.paidAmount == null || payment.paidAmount < payment.amount"
+                        type="button"
+                        class="btn-outline flex-1 text-[10px] sm:text-xs py-2 sm:py-2.5 text-gold border-gold/30 hover:border-gold/50"
+                        :disabled="paymentActionLoading === payment.id"
+                        @click="markPartialDone(payment)"
+                      >
+                        {{ paymentActionLoading === payment.id ? 'Processing…' : 'Mark Done (₱' + payment.amount.toLocaleString() + ')' }}
+                      </button>
+                      <button
+                        v-if="payment.paidAmount != null && payment.paidAmount >= payment.amount"
+                        type="button"
+                        class="btn-primary flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2"
+                        :disabled="paymentActionLoading === payment.id"
+                        @click="approvePartialPayment(payment)"
+                      >
+                        {{ paymentActionLoading === payment.id ? 'Processing…' : 'Approve (₱' + (payment.paidAmount - payment.amount).toLocaleString() + ' change)' }}
+                      </button>
                     </template>
                   </div>
                 </div>
@@ -1334,173 +2147,10 @@ onUnmounted(() => {
                     Loading receipt…
                   </div>
                 </div>
-                <img v-else-if="receiptModalUrl" :src="receiptModalUrl" alt="Payment receipt" class="w-full rounded-sm" />
+                <img v-else-if="receiptModalUrl" :src="receiptModalUrl" alt="Payment receipt" class="w-full rounded-sm" loading="lazy" decoding="async" />
               </div>
             </div>
           </div>
-        </template>
-
-        <!-- REPORTS TAB -->
-        <template v-if="activeTab === 'reports'">
-          <!-- Renewal Reminders -->
-          <section class="card p-4 sm:p-6 mb-4 sm:mb-6">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide">Membership Renewals</h2>
-                <p class="text-mist text-[10px] sm:text-xs mt-0.5">Send renewal reminders to members expiring within 3 days.</p>
-              </div>
-              <button
-                type="button"
-                class="btn-primary text-[10px] sm:text-xs px-3 sm:px-4 py-1.5 sm:py-2 shrink-0"
-                :disabled="reminderLoading"
-                @click="sendReminders()"
-              >
-                {{ reminderLoading ? 'Sending…' : 'Send Reminders' }}
-              </button>
-            </div>
-            <p v-if="reminderMessage" class="text-green-400 text-xs sm:text-sm mt-3">{{ reminderMessage }}</p>
-            <p v-if="reminderError" class="text-red-400 text-xs sm:text-sm mt-3">{{ reminderError }}</p>
-          </section>
-
-          <section class="card p-4 sm:p-6">
-            <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">Reports & Analytics</h2>
-
-            <div class="flex gap-1.5 sm:gap-2 mb-4 sm:mb-6 flex-wrap">
-              <button
-                type="button"
-                class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
-                :class="reportPeriod === 'day' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
-                @click="reportPeriod = 'day'; loadReports()"
-              >
-                Today
-              </button>
-              <button
-                type="button"
-                class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
-                :class="reportPeriod === 'week' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
-                @click="reportPeriod = 'week'; loadReports()"
-              >
-                This Week
-              </button>
-              <button
-                type="button"
-                class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
-                :class="reportPeriod === 'month' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
-                @click="reportPeriod = 'month'; loadReports()"
-              >
-                This Month
-              </button>
-              <button v-if="reportData" type="button" class="btn-outline px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs ml-auto" @click="exportReport">
-                Export CSV
-              </button>
-            </div>
-
-            <p v-if="reportError" class="text-red-400 text-xs sm:text-sm mb-3 sm:mb-4">{{ reportError }}</p>
-
-            <div v-if="reportLoading" class="text-center py-10">
-              <p class="text-mist text-xs sm:text-sm">Loading report…</p>
-            </div>
-
-            <template v-else-if="reportData">
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
-                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
-                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Total Visits</p>
-                  <p class="font-display text-2xl sm:text-3xl text-gold">{{ reportData.summary.totalVisits }}</p>
-                </div>
-                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
-                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Checked Out</p>
-                  <p class="font-display text-2xl sm:text-3xl text-green-400">{{ reportData.summary.checkedOut }}</p>
-                </div>
-                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
-                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Revenue</p>
-                  <p class="font-display text-2xl sm:text-3xl text-gold">₱{{ reportData.summary.totalRevenue.toLocaleString() }}</p>
-                </div>
-                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
-                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Unique Members</p>
-                  <p class="font-display text-2xl sm:text-3xl text-gold">{{ reportData.summary.uniqueMembers }}</p>
-                </div>
-              </div>
-
-              <p class="text-mist text-[10px] sm:text-xs mb-3 sm:mb-4">
-                {{ reportPeriod === 'day' ? 'Today' : reportPeriod === 'week' ? 'This Week' : 'This Month' }}: <span class="text-cream font-medium">{{ reportData.summary.dateFrom }}</span> — <span class="text-cream font-medium">{{ reportData.summary.dateTo }}</span>
-              </p>
-
-              <div v-if="reportData.chartData.length > 0 && reportData.chartData.some(p => p.visits > 0)" class="mb-4 sm:mb-6">
-                <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">
-                  {{ reportPeriod === 'day' ? 'Today' : reportPeriod === 'week' ? 'This Week' : 'This Month' }} — Revenue
-                </h3>
-                <div class="overflow-x-auto">
-                  <div class="flex items-end gap-1 sm:gap-1.5 min-h-[160px] sm:min-h-[200px] px-2 pb-8">
-                    <div
-                      v-for="point in reportData.chartData"
-                      :key="point.date"
-                      class="flex-1 flex flex-col items-center gap-1 min-w-[28px] sm:min-w-[36px]"
-                    >
-                      <span v-if="point.revenue > 0" class="text-[8px] sm:text-[10px] text-gold font-semibold">₱{{ point.revenue }}</span>
-                      <div
-                        class="w-full rounded-t transition-all"
-                        :class="point.revenue > 0 ? 'bg-gold' : 'bg-iron/30'"
-                        :style="{ height: point.revenue > 0 ? `${Math.max((point.revenue / maxRevenue) * 100, 12)}%` : '4px' }"
-                      />
-                      <span class="text-[8px] sm:text-[10px] text-mist font-medium">{{ point.label }}</span>
-                    </div>
-                  </div>
-                  <div class="flex items-center gap-2 mt-1 justify-center">
-                    <div class="w-3 h-3 bg-gold rounded-sm" />
-                    <span class="text-[9px] sm:text-[10px] text-mist">Revenue (₱65/check-out)</span>
-                  </div>
-                </div>
-              </div>
-
-              <div v-if="reportData.visits.length > 0">
-                <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">
-                  Visit Log <span class="text-mist text-xs sm:text-sm font-body">({{ reportData.visits.length }} total)</span>
-                </h3>
-                <div class="overflow-x-auto">
-                  <table class="w-full text-[10px] sm:text-xs min-w-[450px]">
-                    <thead>
-                      <tr class="border-b border-iron">
-                        <th class="text-left p-2 sm:p-3 text-gold font-display tracking-wide">Date</th>
-                        <th class="text-left p-2 sm:p-3 text-gold font-display tracking-wide">Name</th>
-                        <th class="text-left p-2 sm:p-3 text-gold font-display tracking-wide">Pass Code</th>
-                        <th class="text-right p-2 sm:p-3 text-gold font-display tracking-wide">Amount</th>
-                        <th class="text-left p-2 sm:p-3 text-gold font-display tracking-wide">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="v in reportData.visits.slice(0, visitLogLimit)" :key="v.id" class="border-b border-iron/50 last:border-0">
-                        <td class="p-2 sm:p-3 text-cream whitespace-nowrap">{{ v.visitDate }}</td>
-                        <td class="p-2 sm:p-3 text-cream">{{ v.fullName }}</td>
-                        <td class="p-2 sm:p-3 text-gold font-display tracking-wider">{{ v.passCode }}</td>
-                        <td class="p-2 sm:p-3 text-cream text-right">{{ v.paymentAmount ? `₱${v.paymentAmount}` : '—' }}</td>
-                        <td class="p-2 sm:p-3">
-                          <span :class="statusClass(v.status)">{{ statusLabel(v.status) }}</span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div v-if="reportData.visits.length > visitLogLimit" class="text-center mt-3">
-                  <button type="button" class="text-gold text-[11px] sm:text-xs uppercase tracking-wider hover:underline" @click="visitLogLimit += 5">
-                    Show More ({{ reportData.visits.length - visitLogLimit }} remaining)
-                  </button>
-                </div>
-                <div v-if="visitLogLimit > 5 && reportData.visits.length > 5" class="text-center mt-2">
-                  <button type="button" class="text-mist text-[10px] sm:text-[11px] uppercase tracking-wider hover:text-cream" @click="visitLogLimit = 5">
-                    Show Less
-                  </button>
-                </div>
-              </div>
-
-              <div v-else class="text-center py-6">
-                <p class="text-mist text-xs sm:text-sm">No visits found for this period.</p>
-              </div>
-            </template>
-
-            <div v-else class="text-center py-10">
-              <p class="text-mist text-xs sm:text-sm">Select a period above to view the report.</p>
-            </div>
-          </section>
         </template>
 
         <!-- COACHES TAB -->
@@ -1548,12 +2198,21 @@ onUnmounted(() => {
                 <textarea id="coach-bio" v-model="coachForm.bio" rows="3" class="input-field resize-none" maxlength="500" placeholder="Short description about the coach" />
               </div>
               <div>
-                <label for="coach-photo" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Photo URL</label>
-                <input id="coach-photo" v-model="coachForm.photoUrl" type="url" class="input-field" placeholder="https://example.com/photo.jpg" />
+                <label for="coach-photo" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Photo</label>
+                <label for="coach-photo" class="flex items-center gap-3 cursor-pointer">
+                  <div class="w-16 h-16 rounded-full overflow-hidden border border-iron bg-graphite flex items-center justify-center shrink-0">
+                    <img v-if="coachPhotoPreview || coachForm.photoUrl" :src="coachPhotoPreview || coachForm.photoUrl" alt="Coach photo" class="w-full h-full object-cover" loading="lazy" decoding="async" width="64" height="64" />
+                    <span v-else class="text-mist text-lg">📷</span>
+                  </div>
+                  <div class="text-[10px] sm:text-xs text-mist">
+                    <p class="text-gold hover:underline">Tap to upload photo</p>
+                    <p class="text-mist/60">JPEG, PNG, or WebP — max 5MB</p>
+                  </div>
+                </label>
+                <input id="coach-photo" type="file" accept="image/jpeg,image/jpg,image/png,image/webp" class="sr-only" @change="handleCoachPhotoChange" />
+                <p v-if="coachPhotoUploading" class="text-gold text-[9px] sm:text-[10px] mt-0.5">Uploading photo...</p>
               </div>
 
-              <p v-if="coachError" class="text-red-400 text-xs sm:text-sm">{{ coachError }}</p>
-              <p v-if="coachSuccess" class="text-green-400 text-xs sm:text-sm">{{ coachSuccess }}</p>
 
               <div class="flex gap-2">
                 <button type="submit" class="btn-primary flex-1" :disabled="coachLoading">
@@ -1595,10 +2254,11 @@ onUnmounted(() => {
                     </button>
                     <button
                       type="button"
-                      class="text-red-400 hover:text-red-300 text-[10px] sm:text-xs uppercase tracking-wider transition-colors"
+                      class="text-[10px] sm:text-xs uppercase tracking-wider transition-colors px-2 py-1"
+                      :class="coachConfirmDelete === coach.id ? 'bg-red-400/20 text-red-400 border border-red-400/50' : 'text-red-400 hover:text-red-300'"
                       @click="deleteCoach(coach.id, coach.fullName)"
                     >
-                      Remove
+                      {{ coachConfirmDelete === coach.id ? 'Confirm Remove' : 'Remove' }}
                     </button>
                   </div>
                 </div>
@@ -1607,8 +2267,8 @@ onUnmounted(() => {
           </section>
         </template>
 
-        <!-- MANAGEMENT TAB -->
-        <template v-if="activeTab === 'management'">
+        <!-- MEMBERSHIP TAB -->
+        <template v-if="activeTab === 'membership'">
           <!-- Summary Cards -->
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
             <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
@@ -1640,7 +2300,7 @@ onUnmounted(() => {
                 </div>
                 <div>
                   <label for="ci-phone" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Phone *</label>
-                  <input id="ci-phone" v-model="clientForm.clientPhone" type="tel" class="input-field" maxlength="11" placeholder="09XXXXXXXXX" />
+                  <input id="ci-phone" v-model="clientForm.clientPhone" type="tel" class="input-field" maxlength="13" placeholder="+639XXXXXXXXX" @blur="clientForm.clientPhone = formatPhone(clientForm.clientPhone)" />
                 </div>
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
@@ -1663,21 +2323,33 @@ onUnmounted(() => {
                     <input type="radio" v-model="clientForm.plan" value="weekly" class="accent-gold" />
                     <div>
                       <span class="text-cream text-[11px] sm:text-sm font-medium block">Weekly</span>
-                      <span class="text-mist text-[9px] sm:text-[10px]">4 sessions</span>
+                      <span class="text-mist text-[9px] sm:text-[10px]">₱599 · 4 sessions</span>
                     </div>
                   </label>
                   <label class="flex items-center gap-2 cursor-pointer p-2.5 sm:p-3 border border-iron hover:border-gold/50 transition-colors flex-1 text-center" :class="clientForm.plan === 'monthly' ? 'border-gold bg-gold/5' : ''">
                     <input type="radio" v-model="clientForm.plan" value="monthly" class="accent-gold" />
                     <div>
                       <span class="text-cream text-[11px] sm:text-sm font-medium block">Monthly</span>
-                      <span class="text-mist text-[9px] sm:text-[10px]">13 sessions</span>
+                      <span class="text-mist text-[9px] sm:text-[10px]">₱1,499 · 13 sessions</span>
                     </div>
                   </label>
                 </div>
               </div>
 
-              <p v-if="clientError" class="text-red-400 text-xs sm:text-sm">{{ clientError }}</p>
-              <p v-if="clientSuccess" class="text-green-400 text-xs sm:text-sm">{{ clientSuccess }}</p>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div>
+                  <label class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Amount Paid (optional)</label>
+                  <div class="relative">
+                    <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gold text-[10px] sm:text-xs">₱</span>
+                    <input v-model="clientPaidAmountInput" type="number" min="0" step="0.01" class="input-field pl-6" placeholder="0" />
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Note (optional)</label>
+                  <input v-model="clientNoteInput" type="text" class="input-field" placeholder="e.g. paid via GCash" maxlength="200" />
+                </div>
+              </div>
+
 
               <button type="submit" class="btn-primary w-full" :disabled="clientLoading">
                 {{ clientLoading ? 'Adding…' : 'Add Client' }}
@@ -1788,6 +2460,17 @@ onUnmounted(() => {
                     <span>End: <span class="text-cream">{{ client.end_date }}</span></span>
                   </div>
 
+                  <!-- Payment Info -->
+                  <div v-if="client.paid_amount != null || client.note" class="space-y-1">
+                    <div v-if="client.paid_amount != null" class="bg-gold/5 border border-gold/20 rounded-sm p-2 text-[10px] sm:text-xs">
+                      <span class="text-gold font-medium">Paid:</span>
+                      <span class="text-cream"> ₱{{ client.paid_amount.toLocaleString() }}</span>
+                      <span class="text-mist"> of ₱{{ (client.plan === 'monthly' ? 1499 : 599).toLocaleString() }}</span>
+                      <span v-if="client.paid_amount < (client.plan === 'monthly' ? 1499 : 599)" class="text-mist"> (₱{{ ((client.plan === 'monthly' ? 1499 : 599) - client.paid_amount).toLocaleString() }} remaining)</span>
+                    </div>
+                    <div v-if="client.note" class="text-[9px] sm:text-[10px] text-mist italic">Note: {{ client.note }}</div>
+                  </div>
+
                   <!-- Actions -->
                   <div class="flex gap-2 pt-1">
                     <button
@@ -1799,6 +2482,15 @@ onUnmounted(() => {
                       + Complete Session
                     </button>
                     <button
+                      v-if="client.paid_amount == null || client.paid_amount < (client.plan === 'monthly' ? 1499 : 599)"
+                      type="button"
+                      class="btn-outline flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2 text-gold border-gold/30 hover:border-gold/50"
+                      :disabled="clientActionLoading === client.id"
+                      @click="updateClientPayment(client.id)"
+                    >
+                      {{ clientActionLoading === client.id ? 'Updating…' : 'Mark Paid' }}
+                    </button>
+                    <button
                       v-if="client.sessions_used > 0"
                       type="button"
                       class="btn-outline flex-1 text-[10px] sm:text-xs py-1.5 sm:py-2"
@@ -1808,10 +2500,11 @@ onUnmounted(() => {
                     </button>
                     <button
                       type="button"
-                      class="text-red-400 hover:text-red-300 text-[10px] sm:text-xs uppercase tracking-wider px-2 sm:px-3 py-1.5 border border-red-400/30 hover:border-red-400/50 transition-colors"
+                      class="text-[10px] sm:text-xs uppercase tracking-wider px-2 sm:px-3 py-1.5 transition-colors"
+                      :class="clientConfirmDelete === client.id ? 'bg-red-400/20 text-red-400 border border-red-400/50' : 'text-red-400 hover:text-red-300 border border-red-400/30 hover:border-red-400/50'"
                       @click="deleteClient(client.id, client.client_name)"
                     >
-                      Remove
+                      {{ clientConfirmDelete === client.id ? 'Confirm Remove' : 'Remove' }}
                     </button>
                   </div>
                 </div>
@@ -1862,8 +2555,6 @@ onUnmounted(() => {
                 </button>
               </div>
             </div>
-
-            <p v-if="leaderboardError" class="text-red-400 text-xs sm:text-sm mb-3 sm:mb-4">{{ leaderboardError }}</p>
 
             <div v-if="leaderboardLoading" class="text-center py-12">
               <div class="inline-flex items-center gap-2 text-mist text-xs sm:text-sm">

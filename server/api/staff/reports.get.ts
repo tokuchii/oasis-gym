@@ -2,8 +2,6 @@ import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { getVisitDateManila } from '~/server/utils/walkin'
 
-const WALKIN_FEE = 65
-
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -44,7 +42,7 @@ export default defineEventHandler(async (event) => {
     .select('*')
     .gte('visit_date', dateFrom)
     .lte('visit_date', dateTo)
-    .order('visit_date', { ascending: true })
+    .order('created_at', { ascending: false })
 
   if (passError) {
     throw createError({ statusCode: 500, statusMessage: passError.message })
@@ -65,7 +63,7 @@ export default defineEventHandler(async (event) => {
 
   const totalVisits = serialized.length
   const checkedOut = serialized.filter((p) => p.status === 'checked_in').length
-  const totalRevenue = serialized.filter((p) => p.status === 'checked_in').reduce((sum, p) => sum + (p.paymentAmount ?? WALKIN_FEE), 0)
+  const totalRevenue = serialized.filter((p) => p.status === 'checked_in').reduce((sum, p) => sum + (p.paymentAmount ?? 0), 0)
   const uniquePhones = new Set(serialized.map((p) => p.phone)).size
 
   const dailyBreakdown: Record<string, { visits: number; checkedOut: number; revenue: number }> = {}
@@ -76,7 +74,7 @@ export default defineEventHandler(async (event) => {
     dailyBreakdown[p.visitDate].visits++
     if (p.status === 'checked_in') {
       dailyBreakdown[p.visitDate].checkedOut++
-      dailyBreakdown[p.visitDate].revenue += p.paymentAmount ?? WALKIN_FEE
+      dailyBreakdown[p.visitDate].revenue += p.paymentAmount ?? 0
     }
   }
 

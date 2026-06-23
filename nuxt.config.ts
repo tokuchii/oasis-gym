@@ -31,6 +31,7 @@ export default defineNuxtConfig({
       ],
       link: [
         { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+        { rel: 'manifest', href: '/manifest.json' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         {
@@ -44,6 +45,23 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
 
   modules: ['@nuxtjs/tailwindcss'],
+
+  nitro: {
+    routeRules: {
+      '/**': {
+        headers: {
+          'X-Content-Type-Options': 'nosniff',
+          'X-Frame-Options': 'DENY',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+          'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+          'X-XSS-Protection': '0',
+      script: [
+        { children: "if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js') }" },
+      ],
+    },
+  },
+    },
+  },
 
   runtimeConfig: {
     supabaseUrl: process.env.SUPABASE_URL,
