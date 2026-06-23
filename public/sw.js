@@ -1,9 +1,9 @@
-const CACHE_NAME = 'oasis-shell-v1'
+const CACHE_NAME = 'oasis-shell-v2'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(['/staff', '/favicon.svg'])
+      return cache.addAll(['/', '/staff', '/favicon.svg'])
     })
   )
   self.skipWaiting()
@@ -43,7 +43,15 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .catch(() => caches.match('/staff').then((cached) => cached || caches.match('/')))
+    )
+    return
+  }
+
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
+    caches.match(event.request).then((cached) => cached || fetch(event.request))
   )
 })

@@ -5,7 +5,6 @@ import { useWriteQueue } from './useWriteQueue'
 interface CacheConfig {
   store: string
   label: string
-  staleWhileRevalidate?: boolean
 }
 
 export function useCachedFetch() {

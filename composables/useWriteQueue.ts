@@ -9,10 +9,14 @@ interface QueuedWrite {
   body: unknown
   createdAt: string
   label: string
+  retryCount?: number
 }
 
 const syncing = ref(false)
 const queueLength = ref(0)
+const MAX_RETRIES = 3
+
+let autoSyncInitialized = false
 
 async function refreshQueueLength() {
   const { getAll } = useOfflineDb()
@@ -21,13 +25,22 @@ async function refreshQueueLength() {
 }
 
 export function useWriteQueue() {
-  const { getAll, remove, clear } = useOfflineDb()
+  const { getAll, remove, put, clear } = useOfflineDb()
   const { isOnline } = useOnlineStatus()
   const toast = useToast()
 
-  async function enqueue(entry: Omit<QueuedWrite, 'id' | 'createdAt'>) {
-    const { put } = useOfflineDb()
-    await put('writeQueue', { ...entry, createdAt: new Date().toISOString() })
+  if (!autoSyncInitialized && import.meta.client) {
+    watch(isOnline, (online) => {
+      if (online) {
+        nextTick(() => sync())
+      }
+    })
+    autoSyncInitialized = true
+  }
+
+  async function enqueue(entry: Omit<QueuedWrite, 'id' | 'createdAt' | 'retryCount'>) {
+    const { put: dbPut } = useOfflineDb()
+    await dbPut('writeQueue', { ...entry, createdAt: new Date().toISOString(), retryCount: 0 })
     await refreshQueueLength()
     toast.warning(`Saved offline: ${entry.label}`)
   }
@@ -42,11 +55,19 @@ export function useWriteQueue() {
     let failed = 0
 
     for (const item of queue) {
+      if ((item.retryCount ?? 0) >= MAX_RETRIES) {
+        if (item.id) await remove('writeQueue', item.id)
+        failed++
+        continue
+      }
       try {
         await $fetch(item.url, { method: item.method as 'POST' | 'GET' | 'PUT' | 'DELETE', body: item.body })
         if (item.id) await remove('writeQueue', item.id)
         succeeded++
       } catch {
+        if (item.id) {
+          await put('writeQueue', { ...item, retryCount: (item.retryCount ?? 0) + 1 })
+        }
         failed++
       }
     }
