@@ -1,10 +1,13 @@
 import { createWorker, PSM } from 'tesseract.js'
+import { getApiBase } from './useApiBase'
 
 async function extractViaGemini(file: File): Promise<string | null> {
   try {
     const formData = new FormData()
     formData.append('image', file)
-    const res = await $fetch('/api/ocr/receipt', {
+    const base = getApiBase()
+    const url = base ? `${base}/api/ocr/receipt` : '/api/ocr/receipt'
+    const res = await $fetch(url, {
       method: 'POST',
       body: formData,
     })

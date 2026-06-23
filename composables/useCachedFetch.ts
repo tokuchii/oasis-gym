@@ -1,6 +1,7 @@
 import { useOfflineDb } from './useOfflineDb'
 import { useOnlineStatus } from './useOnlineStatus'
 import { useWriteQueue } from './useWriteQueue'
+import { getApiBase } from './useApiBase'
 
 interface CacheConfig {
   store: string
@@ -12,10 +13,15 @@ export function useCachedFetch() {
   const { put, get, clear } = useOfflineDb()
   const { enqueue } = useWriteQueue()
 
+  function fullUrl(url: string): string {
+    const base = getApiBase()
+    return base ? `${base}${url}` : url
+  }
+
   async function cachedGet<T>(url: string, opts: { params?: Record<string, string>; cache?: CacheConfig }): Promise<T> {
     if (isOnline.value) {
       try {
-        const data = await $fetch<T>(url, { params: opts.params })
+        const data = await $fetch<T>(fullUrl(url), { params: opts.params })
         if (opts.cache) {
           const key = opts.params ? JSON.stringify(opts.params) : 'all'
           await put(opts.cache.store, { id: key, data, fetchedAt: Date.now() })
@@ -38,7 +44,7 @@ export function useCachedFetch() {
   async function cachedPost<T>(url: string, body: unknown, opts: { label: string; cacheInvalidates?: string[] }): Promise<T> {
     if (isOnline.value) {
       try {
-        const data = await $fetch<T>(url, { method: 'POST', body })
+        const data = await $fetch<T>(fullUrl(url), { method: 'POST', body })
         if (opts.cacheInvalidates) {
           for (const store of opts.cacheInvalidates) {
             await clear(store)

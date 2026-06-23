@@ -3,8 +3,14 @@ import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { MEMBERSHIP_PLANS, MEMBERSHIP_PLANS_DISPLAY } from '~/types/walkin'
 import { extractRefFromReceipt } from '~/composables/useReceiptOcr'
 import { useToast } from '~/composables/useToast'
+import { getApiBase } from '~/composables/useApiBase'
 
 const toast = useToast()
+
+function apiUrl(path: string): string {
+  const base = getApiBase()
+  return base ? `${base}${path}` : path
+}
 
 useHead({
   title: 'OASIS FITNESS GYM — Calauan, Laguna',
@@ -367,7 +373,7 @@ async function submitPaymentForm() {
       formData.append('receipt', paymentReceipt.value)
     }
 
-    await $fetch('/api/membership/submit', {
+    await $fetch(apiUrl('/api/membership/submit'), {
       method: 'POST',
       body: formData,
     })
@@ -408,7 +414,7 @@ async function submitWalkinForm() {
       qrPayload: string
       fullName: string
       visitDate: string
-    }>('/api/walkin/register', {
+    }>(apiUrl('/api/walkin/register'), {
       method: 'POST',
       body: {
         fullName: walkinForm.fullName,
@@ -453,7 +459,7 @@ onMounted(async () => {
   handleScroll()
 
   try {
-    const data = await $fetch<{ coaches: typeof coachesList.value }>('/api/coaches/list')
+    const data = await $fetch<{ coaches: typeof coachesList.value }>(apiUrl('/api/coaches/list'))
     coachesList.value = data.coaches
   } catch {
     coachesList.value = []

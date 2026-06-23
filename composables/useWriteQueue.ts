@@ -1,6 +1,7 @@
 import { useOfflineDb } from './useOfflineDb'
 import { useOnlineStatus } from './useOnlineStatus'
 import { useToast } from './useToast'
+import { getApiBase } from './useApiBase'
 
 interface QueuedWrite {
   id?: number
@@ -61,7 +62,9 @@ export function useWriteQueue() {
         continue
       }
       try {
-        await $fetch(item.url, { method: item.method as 'POST' | 'GET' | 'PUT' | 'DELETE', body: item.body })
+        const base = getApiBase()
+        const fullUrl = base ? `${base}${item.url}` : item.url
+        await $fetch(fullUrl, { method: item.method as 'POST' | 'GET' | 'PUT' | 'DELETE', body: item.body })
         if (item.id) await remove('writeQueue', item.id)
         succeeded++
       } catch {
