@@ -49,6 +49,12 @@ export default defineNuxtConfig({
 
   modules: ['@nuxtjs/tailwindcss'],
 
+  vite: {
+    build: {
+      target: 'es2020',
+    },
+  },
+
   nitro: {
     routeRules: {
       '/**': {
