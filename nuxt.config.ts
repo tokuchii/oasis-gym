@@ -39,6 +39,9 @@ export default defineNuxtConfig({
           href: 'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap',
         },
       ],
+      script: [
+        { children: "if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js') }" },
+      ],
     },
   },
 
@@ -55,11 +58,8 @@ export default defineNuxtConfig({
           'Referrer-Policy': 'strict-origin-when-cross-origin',
           'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
           'X-XSS-Protection': '0',
-      script: [
-        { children: "if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js') }" },
-      ],
-    },
-  },
+        },
+      },
     },
   },
 
