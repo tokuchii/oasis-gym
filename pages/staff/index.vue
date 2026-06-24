@@ -1286,6 +1286,9 @@ onUnmounted(() => {
             {{ loginSubmitting ? 'Signing in…' : 'Sign In' }}
           </button>
         </form>
+        <p class="text-center mt-4 sm:mt-6">
+          <NuxtLink to="/" class="text-mist text-xs sm:text-sm hover:text-cream transition-colors">&larr; Go back to website</NuxtLink>
+        </p>
       </div>
 
       <!-- Dashboard -->
