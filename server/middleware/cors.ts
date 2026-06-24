@@ -10,6 +10,7 @@ export default defineEventHandler((event) => {
   setResponseHeader(event, 'Access-Control-Max-Age', '86400')
 
   if (getMethod(event) === 'OPTIONS') {
-    return sendNoContent(event)
+    setResponseStatus(event, 204)
+    return ''
   }
 })
