@@ -120,6 +120,16 @@ const reportLoading = ref(false)
 const reportError = ref('')
 const reportData = ref<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[] } | null>(null)
 
+const sortedVisits = computed(() => {
+  if (!reportData.value) return []
+  return [...reportData.value.visits].sort((a, b) => {
+    if (a.status === b.status) {
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    }
+    return a.status === 'checked_in' ? -1 : 1
+  })
+})
+
 const reminderLoading = ref(false)
 const reminderMessage = ref('')
 const reminderError = ref('')
@@ -1191,7 +1201,7 @@ function exportReport() {
   const esc = (s: string) => `"${(s ?? '').replace(/"/g, '""')}"`
   const rows: string[] = []
   rows.push('Date,Name,Email,Phone,Pass Code,Status,Amount,Checked In At')
-  for (const v of reportData.value.visits) {
+  for (const v of sortedVisits.value) {
     const status = v.status === 'checked_in' ? 'Checked Out' : v.status === 'registered' ? 'Registered' : 'Expired'
     const amount = v.paymentAmount ? `₱${v.paymentAmount}` : '—'
     const checkinTime = v.checkedInAt ? new Date(v.checkedInAt).toLocaleString('en-PH', { timeZone: 'Asia/Manila' }) : '—'
@@ -1463,9 +1473,9 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <div v-if="reportData.visits.length > 0">
+              <div v-if="sortedVisits.length > 0">
                 <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">
-                  Visit Log <span class="text-mist text-xs sm:text-sm font-body">({{ reportData.visits.length }} total)</span>
+                  Visit Log <span class="text-mist text-xs sm:text-sm font-body">({{ sortedVisits.length }} total)</span>
                 </h3>
                 <div class="overflow-x-auto">
                   <table class="w-full text-[10px] sm:text-xs min-w-[450px]">
@@ -1479,7 +1489,7 @@ onUnmounted(() => {
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="v in reportData.visits.slice(0, visitLogLimit)" :key="v.id" class="border-b border-iron/50 last:border-0">
+                      <tr v-for="v in sortedVisits.slice(0, visitLogLimit)" :key="v.id" class="border-b border-iron/50 last:border-0">
                         <td class="p-2 sm:p-3 text-cream whitespace-nowrap">{{ v.visitDate }}</td>
                         <td class="p-2 sm:p-3 text-cream">{{ v.fullName }}</td>
                         <td class="p-2 sm:p-3 text-gold font-display tracking-wider">{{ v.passCode }}</td>
@@ -1491,12 +1501,12 @@ onUnmounted(() => {
                     </tbody>
                   </table>
                 </div>
-                <div v-if="reportData.visits.length > visitLogLimit" class="text-center mt-3">
+                <div v-if="sortedVisits.length > visitLogLimit" class="text-center mt-3">
                   <button type="button" class="text-gold text-[11px] sm:text-xs uppercase tracking-wider hover:underline" @click="visitLogLimit += 5">
-                    Show More ({{ reportData.visits.length - visitLogLimit }} remaining)
+                    Show More ({{ sortedVisits.length - visitLogLimit }} remaining)
                   </button>
                 </div>
-                <div v-if="visitLogLimit > 5 && reportData.visits.length > 5" class="text-center mt-2">
+                <div v-if="visitLogLimit > 5 && sortedVisits.length > 5" class="text-center mt-2">
                   <button type="button" class="text-mist text-[10px] sm:text-[11px] uppercase tracking-wider hover:text-cream" @click="visitLogLimit = 5">
                     Show Less
                   </button>
