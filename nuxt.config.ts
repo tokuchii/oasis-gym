@@ -57,6 +57,7 @@ export default defineNuxtConfig({
   },
 
   nitro: {
+    preset: 'static',
     routeRules: {
       '/**': {
         headers: {
@@ -94,8 +95,4 @@ export default defineNuxtConfig({
   },
 
   compatibilityDate: '2024-11-01',
-
-  $fetch: {
-    credentials: 'include',
-  },
 })

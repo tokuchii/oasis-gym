@@ -128,7 +128,8 @@ async function sendReminders() {
   reminderLoading.value = true
 
   try {
-    const data = await $fetch<{ message: string; sent: number; failed: number }>(apiUrl('/api/membership/send-reminders'), {
+    const api = useApi()
+    const data = await api<{ message: string; sent: number; failed: number }>(apiUrl('/api/membership/send-reminders'), {
       method: 'POST',
     })
     toast.success(data.message)
@@ -284,7 +285,8 @@ const maxVisits = computed(() => {
 async function checkSession() {
   checkingSession.value = true
   try {
-    const data = await $fetch<{ authenticated: boolean }>(apiUrl('/api/admin/session'))
+    const api = useApi()
+    const data = await api<{ authenticated: boolean }>(apiUrl('/api/admin/session'))
     authenticated.value = data.authenticated
     await dbPut('meta', { key: 'session', authenticated: data.authenticated, cachedAt: Date.now() })
   } catch {
@@ -303,7 +305,8 @@ async function login() {
   loginError.value = ''
   loginSubmitting.value = true
   try {
-    await $fetch(apiUrl('/api/admin/login'), {
+    const api = useApi()
+    await api(apiUrl('/api/admin/login'), {
       method: 'POST',
       body: { password: loginPassword.value },
     })
@@ -318,7 +321,8 @@ async function login() {
 }
 
 async function logout() {
-  await $fetch(apiUrl('/api/admin/logout'), { method: 'POST' })
+  const api = useApi()
+  await api(apiUrl('/api/admin/logout'), { method: 'POST' })
   authenticated.value = false
   destroyScanner()
   resetState()
@@ -661,7 +665,8 @@ async function openReceiptModal(url: string, name: string) {
   receiptModalUrl.value = ''
   receiptModalName.value = name
   try {
-    const data = await $fetch<{ signedUrl: string }>(apiUrl('/api/membership/receipt-url'), {
+    const api = useApi()
+    const data = await api<{ signedUrl: string }>(apiUrl('/api/membership/receipt-url'), {
       method: 'POST',
       body: { url },
     })
@@ -868,7 +873,8 @@ async function uploadCoachPhoto(): Promise<string | null> {
   try {
     const formData = new FormData()
     formData.append('photo', coachPhotoFile.value)
-    const data = await $fetch<{ photoUrl: string }>(apiUrl('/api/coaches/upload-photo'), { method: 'POST', body: formData })
+    const api = useApi()
+    const data = await api<{ photoUrl: string }>(apiUrl('/api/coaches/upload-photo'), { method: 'POST', body: formData })
     return data.photoUrl
   } catch {
     return null

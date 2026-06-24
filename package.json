@@ -7,7 +7,9 @@
     "build": "nuxt build",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "postinstall": "nuxt prepare"
+    "postinstall": "nuxt prepare",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",
@@ -28,7 +30,10 @@
     "@nuxtjs/tailwindcss": "^6.13.1",
     "@types/nodemailer": "^8.0.1",
     "@types/qrcode": "^1.5.5",
+    "@vue/test-utils": "^2.4.11",
     "canvas": "^3.2.3",
-    "typescript": "^5.8.2"
+    "happy-dom": "^20.10.6",
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.9"
   }
 }

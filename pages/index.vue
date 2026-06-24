@@ -376,7 +376,8 @@ async function submitPaymentForm() {
       formData.append('receipt', paymentReceipt.value)
     }
 
-    await $fetch(apiUrl('/api/membership/submit'), {
+    const api = useApi()
+    await api(apiUrl('/api/membership/submit'), {
       method: 'POST',
       body: formData,
     })
@@ -479,7 +480,8 @@ onMounted(async () => {
   handleScroll()
 
   try {
-    const data = await $fetch<{ coaches: typeof coachesList.value }>(apiUrl('/api/coaches/list'))
+    const api = useApi()
+    const data = await api<{ coaches: typeof coachesList.value }>(apiUrl('/api/coaches/list'))
     coachesList.value = data.coaches
   } catch {
     coachesList.value = []

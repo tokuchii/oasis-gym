@@ -32,7 +32,8 @@ export function useCachedFetch() {
   async function cachedGet<T>(url: string, opts: { params?: Record<string, string>; cache?: CacheConfig }): Promise<T> {
     if (isOnline.value) {
       try {
-        const data = await $fetch<T>(fullUrl(url), { params: opts.params })
+        const api = useApi()
+        const data = await api<T>(fullUrl(url), { params: opts.params })
         if (opts.cache) {
           const key = opts.params ? JSON.stringify(opts.params) : 'all'
           await put(opts.cache.store, { id: key, data, fetchedAt: Date.now() })
@@ -55,7 +56,8 @@ export function useCachedFetch() {
   async function cachedPost<T>(url: string, body: unknown, opts: { label: string; cacheInvalidates?: string[] }): Promise<T> {
     if (isOnline.value) {
       try {
-        const data = await $fetch<T>(fullUrl(url), { method: 'POST', body })
+        const api = useApi()
+        const data = await api<T>(fullUrl(url), { method: 'POST', body })
         if (opts.cacheInvalidates) {
           for (const store of opts.cacheInvalidates) {
             await clear(store)
