@@ -139,6 +139,7 @@ const coachesList = ref<{ id: string; fullName: string; specialty: string | null
 
 const heroRef = ref<HTMLElement | null>(null)
 const parallaxRef = ref<HTMLElement | null>(null)
+const pageRef = ref<HTMLElement | null>(null)
 let gsapCleanup: (() => void) | null = null
 
 function toggleMobileMenu() {
@@ -525,7 +526,7 @@ onMounted(async () => {
         },
       })
     })
-  })
+  }, pageRef.value)
 
   gsapCleanup = () => ctx.revert()
 })
@@ -537,7 +538,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-onyx">
+  <div ref="pageRef" class="min-h-screen bg-onyx">
     <!-- Navigation -->
     <header class="fixed top-0 left-0 right-0 z-50 bg-onyx/90 backdrop-blur-md border-b border-iron/50">
       <nav class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 flex items-center justify-between h-14 sm:h-16 lg:h-20">
