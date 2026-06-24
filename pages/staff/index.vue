@@ -1438,7 +1438,7 @@ onUnmounted(() => {
                 {{ reportPeriod === 'day' ? 'Today' : reportPeriod === 'week' ? 'This Week' : 'This Month' }}: <span class="text-cream font-medium">{{ reportData.summary.dateFrom }}</span> — <span class="text-cream font-medium">{{ reportData.summary.dateTo }}</span>
               </p>
 
-              <div v-if="reportData.chartData.length > 0 && reportData.chartData.some(p => p.revenue > 0)" class="mb-4 sm:mb-6">
+              <div v-if="reportData?.chartData?.length > 0 && reportData.chartData.some(p => p.revenue > 0)" class="mb-4 sm:mb-6">
                 <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">
                   {{ reportPeriod === 'day' ? 'Today' : reportPeriod === 'week' ? 'This Week' : 'This Month' }} — Revenue
                 </h3>
