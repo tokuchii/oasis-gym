@@ -48,10 +48,11 @@ export function verifyStaffSessionToken(token: string | undefined): boolean {
 }
 
 export function setStaffSession(event: H3Event) {
+  const isProd = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging'
   setCookie(event, COOKIE_NAME, createStaffSessionToken(), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging',
-    sameSite: 'lax',
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
     path: '/',
     maxAge: SESSION_TTL_MS / 1000,
   })
