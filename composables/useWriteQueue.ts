@@ -37,6 +37,7 @@ export function useWriteQueue() {
       }
     })
     autoSyncInitialized = true
+    nextTick(() => sync())
   }
 
   async function enqueue(entry: Omit<QueuedWrite, 'id' | 'createdAt' | 'retryCount'>) {

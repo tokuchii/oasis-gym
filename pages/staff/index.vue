@@ -60,6 +60,8 @@ interface ReportSummary {
   totalVisits: number
   checkedOut: number
   totalRevenue: number
+  walkinRevenue: number
+  membershipRevenue: number
   uniqueMembers: number
   dateFrom: string
   dateTo: string
@@ -72,6 +74,8 @@ interface ChartPoint {
   visits: number
   checkedOut: number
   revenue: number
+  walkinRevenue: number
+  membershipRevenue: number
 }
 
 const authenticated = ref(false)
@@ -1192,6 +1196,8 @@ function exportReport() {
   rows.push(`Total Visits,${reportData.value.summary.totalVisits}`)
   rows.push(`Checked Out,${reportData.value.summary.checkedOut}`)
   rows.push(`Total Revenue,₱${reportData.value.summary.totalRevenue}`)
+  rows.push(`Walk-in Revenue,₱${reportData.value.summary.walkinRevenue}`)
+  rows.push(`Membership Revenue,₱${reportData.value.summary.membershipRevenue}`)
   rows.push(`Unique Members,${reportData.value.summary.uniqueMembers}`)
   rows.push(`Period,${reportData.value.summary.period}`)
   rows.push(`Date From,${reportData.value.summary.dateFrom}`)
@@ -1393,9 +1399,13 @@ onUnmounted(() => {
                   <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Checked Out</p>
                   <p class="font-display text-2xl sm:text-3xl text-green-400">{{ reportData.summary.checkedOut }}</p>
                 </div>
-                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
-                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Revenue</p>
+                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center col-span-2 sm:col-span-1">
+                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Total Revenue</p>
                   <p class="font-display text-2xl sm:text-3xl text-gold">₱{{ reportData.summary.totalRevenue.toLocaleString() }}</p>
+                  <div class="flex justify-center gap-3 mt-1">
+                    <span class="text-[9px] sm:text-[10px] text-green-400">₱{{ reportData.summary.walkinRevenue.toLocaleString() }} walk-in</span>
+                    <span class="text-[9px] sm:text-[10px] text-blue-400">₱{{ reportData.summary.membershipRevenue.toLocaleString() }} membership</span>
+                  </div>
                 </div>
                 <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
                   <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Unique Members</p>
@@ -1407,7 +1417,7 @@ onUnmounted(() => {
                 {{ reportPeriod === 'day' ? 'Today' : reportPeriod === 'week' ? 'This Week' : 'This Month' }}: <span class="text-cream font-medium">{{ reportData.summary.dateFrom }}</span> — <span class="text-cream font-medium">{{ reportData.summary.dateTo }}</span>
               </p>
 
-              <div v-if="reportData.chartData.length > 0 && reportData.chartData.some(p => p.visits > 0)" class="mb-4 sm:mb-6">
+              <div v-if="reportData.chartData.length > 0 && reportData.chartData.some(p => p.revenue > 0)" class="mb-4 sm:mb-6">
                 <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">
                   {{ reportPeriod === 'day' ? 'Today' : reportPeriod === 'week' ? 'This Week' : 'This Month' }} — Revenue
                 </h3>
@@ -1418,18 +1428,31 @@ onUnmounted(() => {
                       :key="point.date"
                       class="flex-1 flex flex-col items-center gap-1 min-w-[28px] sm:min-w-[36px]"
                     >
-                      <span v-if="point.revenue > 0" class="text-[8px] sm:text-[10px] text-gold font-semibold">₱{{ point.revenue }}</span>
-                      <div
-                        class="w-full rounded-t transition-all"
-                        :class="point.revenue > 0 ? 'bg-gold' : 'bg-iron/30'"
-                        :style="{ height: point.revenue > 0 ? `${Math.max((point.revenue / maxRevenue) * 100, 12)}%` : '4px' }"
-                      />
+                      <span v-if="point.revenue > 0" class="text-[8px] sm:text-[10px] text-gold font-semibold">₱{{ point.revenue.toLocaleString() }}</span>
+                      <div class="w-full flex flex-col" :style="{ height: point.revenue > 0 ? `${Math.max((point.revenue / maxRevenue) * 100, 12)}%` : '4px' }">
+                        <div
+                          v-if="point.membershipRevenue > 0"
+                          class="w-full bg-blue-400 transition-all"
+                          :style="{ height: point.revenue > 0 ? `${(point.membershipRevenue / point.revenue) * 100}%` : '0' }"
+                        />
+                        <div
+                          class="w-full transition-all rounded-t"
+                          :class="point.walkinRevenue > 0 ? 'bg-gold' : point.membershipRevenue > 0 ? '' : 'bg-iron/30'"
+                          :style="{ height: point.revenue > 0 ? `${(point.walkinRevenue / point.revenue) * 100}%` : '4px' }"
+                        />
+                      </div>
                       <span class="text-[8px] sm:text-[10px] text-mist font-medium">{{ point.label }}</span>
                     </div>
                   </div>
-                  <div class="flex items-center gap-2 mt-1 justify-center">
-                    <div class="w-3 h-3 bg-gold rounded-sm" />
-                    <span class="text-[9px] sm:text-[10px] text-mist">Revenue (₱65/check-out)</span>
+                  <div class="flex items-center gap-4 mt-1 justify-center">
+                    <div class="flex items-center gap-1">
+                      <div class="w-3 h-3 bg-gold rounded-sm" />
+                      <span class="text-[9px] sm:text-[10px] text-mist">Walk-in</span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <div class="w-3 h-3 bg-blue-400 rounded-sm" />
+                      <span class="text-[9px] sm:text-[10px] text-mist">Membership</span>
+                    </div>
                   </div>
                 </div>
               </div>

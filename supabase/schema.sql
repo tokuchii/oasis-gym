@@ -6,7 +6,7 @@ create table if not exists walkin_passes (
   pass_code         text unique not null,
   full_name         text not null,
   email             text not null,
-  phone             text not null,
+  phone             text unique not null,
   emergency_contact text not null,
   visit_date        date not null default (timezone('Asia/Manila', now()))::date,
   status            text not null default 'registered' check (status in ('registered', 'checked_in', 'expired')),

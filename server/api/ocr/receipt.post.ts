@@ -24,15 +24,17 @@ export default defineEventHandler(async (event) => {
   const base64 = file.data.toString('base64')
   const mimeType = file.type || 'image/jpeg'
 
-  const prompt = `Extract the payment reference number from this receipt image.
+  const prompt = `Extract the payment reference number from this GCash or bank transfer receipt image.
 
 Return ONLY a JSON object with this exact format:
 {"referenceNumber": "the extracted reference number with no spaces"}
 
 Rules:
-- Look for fields like: Ref No, Reference No, Transaction ID, Trace No, Confirmation No, RRN, Auth Code, Receipt No, Order No, Control No, or any similar identifier
-- If the reference is split across multiple lines, combine the digits
-- Remove all spaces from the reference number
+- For GCash receipts: look for "Ref No", "Reference No", "GCash Ref No", or the 13-digit number near the top
+- For bank transfers: look for "Reference Number", "Transaction ID", "Trace Number", "Confirmation Number"
+- The reference is typically 10-13 digits for GCash, or alphanumeric for bank transfers
+- Remove ALL spaces, dashes, and special characters from the reference number
+- Do NOT confuse amounts (like ₱1,499.00), dates, or phone numbers with the reference number
 - If no reference number is found, return {"referenceNumber": ""}
 - Do NOT include any other text, explanation, or markdown formatting`
 

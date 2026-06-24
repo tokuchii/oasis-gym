@@ -14,7 +14,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid pass code.' })
   }
 
-  if (isNaN(paymentAmount) || paymentAmount < 0 || paymentAmount > 10000) {
+  if (isNaN(paymentAmount) || paymentAmount < 0) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid payment amount.' })
   }
 
@@ -28,8 +28,7 @@ export default defineEventHandler(async (event) => {
     .maybeSingle()
 
   if (error) {
-    console.error('[Checkout] Lookup error:', error)
-    throw createError({ statusCode: 500, statusMessage: 'An error occurred. Please try again.' })
+    throw createError({ statusCode: 500, statusMessage: error.message })
   }
 
   if (!data) {
@@ -60,10 +59,9 @@ export default defineEventHandler(async (event) => {
     .single()
 
   if (updateError || !updated) {
-    console.error('[Checkout] Update error:', updateError)
     throw createError({
       statusCode: 500,
-      statusMessage: 'Failed to check out. Please try again.',
+      statusMessage: `Failed to check out. ${updateError?.message ?? 'Unknown error'}`,
     })
   }
 

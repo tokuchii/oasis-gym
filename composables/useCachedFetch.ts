@@ -3,6 +3,17 @@ import { useOnlineStatus } from './useOnlineStatus'
 import { useWriteQueue } from './useWriteQueue'
 import { getApiBase } from './useApiBase'
 
+function isNetworkError(err: unknown): boolean {
+  if (err instanceof TypeError) return true
+  if (err instanceof DOMException && err.name === 'AbortError') return true
+  if (err && typeof err === 'object') {
+    const msg = String((err as { message?: string }).message ?? '').toLowerCase()
+    if (msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('network request failed') || msg.includes('load failed')) return true
+    if ('status' in err) return false
+  }
+  return false
+}
+
 interface CacheConfig {
   store: string
   label: string
@@ -27,8 +38,8 @@ export function useCachedFetch() {
           await put(opts.cache.store, { id: key, data, fetchedAt: Date.now() })
         }
         return data
-      } catch {
-        // Network error — fall through to cache
+      } catch (err) {
+        if (!isNetworkError(err)) throw err
       }
     }
 
@@ -52,7 +63,9 @@ export function useCachedFetch() {
         }
         return data
       } catch (err) {
-        await enqueue({ url, method: 'POST', body, label: opts.label })
+        if (isNetworkError(err)) {
+          await enqueue({ url, method: 'POST', body, label: opts.label })
+        }
         throw err
       }
     }

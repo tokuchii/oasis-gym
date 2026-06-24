@@ -10,29 +10,18 @@ export default defineEventHandler(async (event) => {
 
   const supabase = useSupabaseAdmin()
 
-  let builder = supabase
+  const { data: allData, error: allError } = await supabase
     .from('membership_payments')
     .select('*')
-    .order('status', { ascending: status === 'pending' ? false : true })
     .order('created_at', { ascending: false })
-    .limit(100)
+    .limit(200)
 
-  if (status && ['pending', 'partial', 'approved', 'rejected'].includes(status)) {
-    builder = builder.eq('status', status)
-  }
-
-  if (coach) {
-    builder = builder.eq('coach', coach)
-  }
-
-  const { data, error } = await builder
-
-  if (error) {
-    console.error('[Membership] List error:', error)
+  if (allError) {
+    console.error('[Membership] List error:', allError)
     throw createError({ statusCode: 500, statusMessage: 'Failed to load payments.' })
   }
 
-  const approvedEmails = (data ?? [])
+  const approvedEmails = (allData ?? [])
     .filter((r) => r.status === 'approved')
     .map((r) => r.email)
 
@@ -46,7 +35,7 @@ export default defineEventHandler(async (event) => {
 
   const removedEmailSet = new Set((removedClients ?? []).map((c) => c.client_email))
 
-  let payments = (data ?? []).map((row) => ({
+  const mapRow = (row: Record<string, unknown>) => ({
     id: row.id,
     fullName: row.full_name,
     email: row.email,
@@ -62,25 +51,35 @@ export default defineEventHandler(async (event) => {
     paidAmount: row.paid_amount ?? null,
     expiryDate: row.expiry_date,
     createdAt: row.created_at,
-    isRemoved: removedEmailSet.has(row.email),
-  }))
+    isRemoved: removedEmailSet.has(row.email as string),
+  })
+
+  const allPayments = (allData ?? []).map(mapRow)
+
+  const summary = {
+    total: allPayments.length,
+    pending: allPayments.filter((p) => p.status === 'pending').length,
+    partial: allPayments.filter((p) => p.status === 'partial').length,
+    approved: allPayments.filter((p) => p.status === 'approved' && !p.isRemoved).length,
+    history: allPayments.filter((p) => p.status === 'approved' && p.isRemoved).length,
+    rejected: allPayments.filter((p) => p.status === 'rejected').length,
+    totalRevenue: allPayments
+      .filter((p) => p.status === 'approved' || p.status === 'partial')
+      .reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0),
+  }
+
+  let payments = allPayments
 
   if (status === 'history') {
     payments = payments.filter((p) => p.isRemoved && p.status === 'approved')
   } else if (status === 'approved') {
     payments = payments.filter((p) => p.status === 'approved' && !p.isRemoved)
+  } else if (status && ['pending', 'partial', 'rejected'].includes(status)) {
+    payments = payments.filter((p) => p.status === status)
   }
 
-  const allApproved = payments.filter((p) => p.status === 'approved')
-  const summary = {
-    total: payments.length,
-    pending: payments.filter((p) => p.status === 'pending').length,
-    partial: payments.filter((p) => p.status === 'partial').length,
-    approved: payments.filter((p) => p.status === 'approved' && !p.isRemoved).length,
-    history: payments.filter((p) => p.status === 'approved' && p.isRemoved).length,
-    rejected: payments.filter((p) => p.status === 'rejected').length,
-    totalRevenue: allApproved
-      .reduce((sum, p) => sum + (p.status === 'partial' && p.paidAmount ? p.paidAmount : p.amount), 0),
+  if (coach) {
+    payments = payments.filter((p) => p.coach === coach)
   }
 
   return { payments, summary }

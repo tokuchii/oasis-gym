@@ -1,11 +1,12 @@
 export default defineNuxtConfig({
   ssr: false,
   devtools: { enabled: process.env.NODE_ENV !== 'production' },
-
-  // Workaround: Nuxt 3.21.8 dev server fails to resolve SSR entry in SPA mode
-  // Fixed in 3.21.9 — remove once upgraded
   experimental: {
     viteEnvironmentApi: true,
+  },
+
+  devServer: {
+    port: 3000,
   },
 
   app: {

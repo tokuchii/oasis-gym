@@ -4,8 +4,11 @@ import { MEMBERSHIP_PLANS, MEMBERSHIP_PLANS_DISPLAY } from '~/types/walkin'
 import { extractRefFromReceipt } from '~/composables/useReceiptOcr'
 import { useToast } from '~/composables/useToast'
 import { getApiBase } from '~/composables/useApiBase'
+import { useCachedFetch } from '~/composables/useCachedFetch'
+import { generateWalkinQrDataUrl } from '~/composables/useWalkinPass'
 
 const toast = useToast()
+const { cachedPost } = useCachedFetch()
 
 function apiUrl(path: string): string {
   const base = getApiBase()
@@ -409,19 +412,20 @@ async function submitWalkinForm() {
 
   walkinSubmitting.value = true
   try {
-    const data = await $fetch<{
+    const data = await cachedPost<{
       passCode: string
       qrPayload: string
       fullName: string
       visitDate: string
-    }>(apiUrl('/api/walkin/register'), {
-      method: 'POST',
-      body: {
-        fullName: walkinForm.fullName,
-        email: walkinForm.email,
-        phone: walkinForm.phone,
-        emergencyContact: walkinForm.emergencyContact,
-      },
+      duplicate?: boolean
+    }>('/api/walkin/register', {
+      fullName: walkinForm.fullName,
+      email: walkinForm.email,
+      phone: walkinForm.phone,
+      emergencyContact: walkinForm.emergencyContact,
+    }, {
+      label: `Register ${walkinForm.fullName}`,
+      cacheInvalidates: ['passes'],
     })
 
     walkinPassCode.value = data.passCode
@@ -432,6 +436,10 @@ async function submitWalkinForm() {
     }
     walkinSuccess.value = true
 
+    if (data.duplicate) {
+      toast.warning('This phone is already registered. Showing your existing pass.')
+    }
+
     Object.assign(walkinForm, {
       fullName: '',
       email: '',
@@ -440,8 +448,20 @@ async function submitWalkinForm() {
       waiverAccepted: false,
     })
   } catch (err: unknown) {
-    const fetchErr = err as { data?: { statusMessage?: string } }
-    toast.error(fetchErr.data?.statusMessage ?? 'Registration failed. Please try again.')
+    const msg = (err as { message?: string }).message ?? ''
+    if (msg === 'Queued for sync') {
+      toast.success('Registration saved offline. It will sync when you reconnect.')
+      Object.assign(walkinForm, {
+        fullName: '',
+        email: '',
+        phone: '',
+        emergencyContact: '',
+        waiverAccepted: false,
+      })
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      toast.error(fetchErr.data?.statusMessage ?? 'Registration failed. Please try again.')
+    }
   } finally {
     walkinSubmitting.value = false
   }

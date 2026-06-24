@@ -1,12 +1,8 @@
 import { generatePassCode } from '~/server/utils/pass-code'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
-import { getVisitDateManila, resolvePassStatus, serializePass, validateWalkinPayload, checkRateLimit } from '~/server/utils/walkin'
+import { getVisitDateManila, resolvePassStatus, serializePass, validateWalkinPayload } from '~/server/utils/walkin'
 
 export default defineEventHandler(async (event) => {
-  const ip = getRequestHeader(event, 'x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
-  const rateError = checkRateLimit(`register:${ip}`, 5, 60000)
-  if (rateError) throw createError({ statusCode: 429, statusMessage: rateError })
-
   const payload = validateWalkinPayload(await readBody(event))
   const supabase = useSupabaseAdmin()
   const visitDate = getVisitDateManila()
@@ -15,24 +11,24 @@ export default defineEventHandler(async (event) => {
     .from('walkin_passes')
     .select('*')
     .eq('phone', payload.phone)
-    .eq('visit_date', visitDate)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle()
 
   if (existingError) {
-    console.error('[Register] Lookup error:', existingError)
     throw createError({
       statusCode: 500,
-      statusMessage: 'An error occurred. Please try again.',
+      statusMessage: `Lookup failed [${existingError.code}]: ${existingError.message}`,
     })
   }
 
   if (existing) {
-    const status = resolvePassStatus(existing)
-    if (status === 'registered' || status === 'checked_in') {
-      throw createError({
-        statusCode: 409,
-        statusMessage: 'A day pass for this phone number is already registered today.',
-      })
+    const pass = serializePass(existing)
+    return {
+      ...pass,
+      qrPayload: pass.passCode,
+      message: 'This phone number is already registered. Here is your existing pass.',
+      duplicate: true,
     }
   }
 
@@ -61,19 +57,30 @@ export default defineEventHandler(async (event) => {
 
     if (error?.code === '23505') {
       if (error.message?.includes('phone')) {
-        throw createError({
-          statusCode: 409,
-          statusMessage: 'A day pass for this phone number is already registered today.',
-        })
+        const { data: existingAgain } = await supabase
+          .from('walkin_passes')
+          .select('*')
+          .eq('phone', payload.phone)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (existingAgain) {
+          const pass = serializePass(existingAgain)
+          return {
+            ...pass,
+            qrPayload: pass.passCode,
+            message: 'This phone number is already registered. Here is your existing pass.',
+            duplicate: true,
+          }
+        }
       }
       passCode = generatePassCode()
       continue
     }
 
-    console.error('[Register] Insert error:', error)
     throw createError({
       statusCode: 500,
-      statusMessage: 'Failed to create day pass. Please try again.',
+      statusMessage: `Supabase error [${error?.code}]: ${error?.message}`,
     })
   }
 

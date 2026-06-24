@@ -14,6 +14,7 @@ export type GymDatabase = {
           payment_amount?: number | null
         }
         Update: Partial<WalkinPass>
+        Relationships: []
       }
       membership_payments: {
         Row: MembershipPayment
@@ -23,6 +24,7 @@ export type GymDatabase = {
           status?: string
         }
         Update: Partial<MembershipPayment>
+        Relationships: []
       }
       client_sessions: {
         Row: ClientSession
@@ -32,6 +34,7 @@ export type GymDatabase = {
           sessions_used?: number
         }
         Update: Partial<ClientSession>
+        Relationships: []
       }
       coaches: {
         Row: Coach
@@ -40,8 +43,13 @@ export type GymDatabase = {
           created_at?: string
         }
         Update: Partial<Coach>
+        Relationships: []
       }
     }
+    Views: Record<string, never>
+    Functions: Record<string, never>
+    Enums: Record<string, never>
+    CompositeTypes: Record<string, never>
   }
 }
 
