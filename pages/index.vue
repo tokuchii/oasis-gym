@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { MEMBERSHIP_PLANS, MEMBERSHIP_PLANS_DISPLAY } from '~/types/walkin'
 import { extractRefFromReceipt } from '~/composables/useReceiptOcr'
 import { useToast } from '~/composables/useToast'
