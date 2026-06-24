@@ -1495,7 +1495,7 @@ onUnmounted(() => {
                     </thead>
                     <tbody>
                       <tr v-for="v in sortedVisits.slice(0, visitLogLimit)" :key="v.id" class="border-b border-iron/50 last:border-0">
-                        <td class="p-2 sm:p-3 text-cream whitespace-nowrap">{{ v.visitDate }}</td>
+                        <td class="p-2 sm:p-3 text-cream whitespace-nowrap">{{ v.visitDate }}<span class="text-mist">{{ v.checkedInAt ? ' ' + new Date(v.checkedInAt).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' }) : '' }}</span></td>
                         <td class="p-2 sm:p-3 text-cream">{{ v.fullName }}</td>
                         <td class="p-2 sm:p-3 text-gold font-display tracking-wider">{{ v.passCode }}</td>
                         <td class="p-2 sm:p-3 text-cream text-right">{{ v.paymentAmount ? `₱${v.paymentAmount}` : '—' }}</td>
