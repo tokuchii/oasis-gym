@@ -44,7 +44,7 @@ export default defineEventHandler(async (event) => {
       .select('id, pass_code, full_name, phone, email, visit_date, status, payment_amount, created_at, checked_in_at')
       .gte('visit_date', dateFrom)
       .lte('visit_date', dateTo)
-      .order('created_at', { ascending: false }),
+      .order('checked_in_at', { ascending: false, nullsFirst: false }),
     supabase
       .from('membership_payments')
       .select('id, full_name, email, phone, plan, amount, paid_amount, status, created_at')

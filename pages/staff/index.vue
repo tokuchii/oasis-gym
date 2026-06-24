@@ -123,12 +123,9 @@ const reportData = ref<{ visits: ReportVisit[]; summary: ReportSummary; chartDat
 const sortedVisits = computed(() => {
   if (!reportData.value) return []
   return [...reportData.value.visits].sort((a, b) => {
-    if (a.status === b.status) {
-      const aTime = a.status === 'checked_in' ? (a.checkedInAt || a.createdAt) : a.createdAt
-      const bTime = b.status === 'checked_in' ? (b.checkedInAt || b.createdAt) : b.createdAt
-      return new Date(bTime).getTime() - new Date(aTime).getTime()
-    }
-    return a.status === 'checked_in' ? -1 : 1
+    const aTime = a.checkedInAt || a.createdAt
+    const bTime = b.checkedInAt || b.createdAt
+    return new Date(bTime).getTime() - new Date(aTime).getTime()
   })
 })
 
@@ -1497,7 +1494,7 @@ onUnmounted(() => {
                     </thead>
                     <tbody>
                       <tr v-for="v in sortedVisits.slice(0, visitLogLimit)" :key="v.id" class="border-b border-iron/50 last:border-0">
-                        <td class="p-2 sm:p-3 text-cream whitespace-nowrap">{{ v.visitDate }}<span class="text-mist"> {{ new Date(v.checkedInAt || v.createdAt).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' }) }}</span></td>
+                        <td class="p-2 sm:p-3 text-cream whitespace-nowrap">{{ v.visitDate }}<br><span class="text-cream/70"> {{ new Date(v.checkedInAt || v.createdAt).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' }) }}</span></td>
                         <td class="p-2 sm:p-3 text-cream">{{ v.fullName }}</td>
                         <td class="p-2 sm:p-3 text-gold font-display tracking-wider">{{ v.passCode }}</td>
                         <td class="p-2 sm:p-3 text-cream text-right">{{ v.paymentAmount ? `₱${v.paymentAmount}` : '—' }}</td>
