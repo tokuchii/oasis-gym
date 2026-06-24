@@ -124,7 +124,9 @@ const sortedVisits = computed(() => {
   if (!reportData.value) return []
   return [...reportData.value.visits].sort((a, b) => {
     if (a.status === b.status) {
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      const aTime = a.status === 'checked_in' ? (a.checkedInAt || a.createdAt) : a.createdAt
+      const bTime = b.status === 'checked_in' ? (b.checkedInAt || b.createdAt) : b.createdAt
+      return new Date(bTime).getTime() - new Date(aTime).getTime()
     }
     return a.status === 'checked_in' ? -1 : 1
   })
