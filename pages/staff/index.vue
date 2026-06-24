@@ -322,6 +322,7 @@ async function login() {
     })
     authenticated.value = true
     loginPassword.value = ''
+    loadReports()
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
     loginError.value = fetchErr.data?.statusMessage ?? 'Login failed.'
@@ -336,6 +337,7 @@ async function logout() {
   authenticated.value = false
   destroyScanner()
   resetState()
+  navigateTo('/')
 }
 
 function resetState() {
