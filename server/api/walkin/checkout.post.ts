@@ -28,11 +28,12 @@ export default defineEventHandler(async (event) => {
     .maybeSingle()
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: error.message })
+    console.error('[Walkin] Checkout lookup error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to look up pass. Please try again.' })
   }
 
   if (!data) {
-    throw createError({ statusCode: 404, statusMessage: 'Pass not found. This QR code is not registered.' })
+    throw createError({ statusCode: 404, statusMessage: 'Pass not found. This pass code is not registered.' })
   }
 
   if (data.status === 'checked_in' && data.checked_in_at) {
@@ -59,10 +60,8 @@ export default defineEventHandler(async (event) => {
     .single()
 
   if (updateError || !updated) {
-    throw createError({
-      statusCode: 500,
-      statusMessage: `Failed to check out. ${updateError?.message ?? 'Unknown error'}`,
-    })
+    console.error('[Walkin] Checkout update error:', updateError)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to check out. Please try again.' })
   }
 
   return {

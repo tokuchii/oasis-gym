@@ -26,7 +26,8 @@ export default defineEventHandler(async (event) => {
     .eq('id', coachId)
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: error.message })
+    console.error('[Coaches] Update error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to update coach. Please try again.' })
   }
 
   return { message: 'Coach updated successfully.' }

@@ -31,7 +31,8 @@ export default defineEventHandler(async (event) => {
     .single()
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: error.message })
+    console.error('[Coaches] Create error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to add coach. Please try again.' })
   }
 
   return {

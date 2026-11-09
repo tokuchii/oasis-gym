@@ -11,10 +11,12 @@ export default defineEventHandler(async (event) => {
   const { data, error } = await supabase
     .from('walkin_passes')
     .select('id, pass_code, full_name, email, phone, points')
+    .eq('removed', false)
     .gt('points', 0)
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: error.message })
+    console.error('[Walkin] Leaderboard error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to load leaderboard. Please try again.' })
   }
 
   const byPhone = new Map<string, { id: string; passCode: string; fullName: string; email: string; phone: string; points: number }>()

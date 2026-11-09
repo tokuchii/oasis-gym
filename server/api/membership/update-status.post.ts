@@ -1,8 +1,8 @@
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
-import { sendMembershipApprovedEmail, sendMembershipRejectedEmail } from '~/server/utils/email'
+import { sendMembershipApprovedEmail, sendMembershipRejectedEmail, sendCertificationEmail } from '~/server/utils/email'
 
-const SESSION_LIMITS: Record<string, number> = { weekly: 4, monthly: 13 }
+const SESSION_LIMITS: Record<string, number> = { weekly: 4, monthly: 13, yearly: 156 }
 
 export default defineEventHandler(async (event) => {
   requireStaff(event)
@@ -82,7 +82,6 @@ export default defineEventHandler(async (event) => {
   }
 
   let emailSent = false
-  let emailError = ''
 
   try {
     if (status === 'approved') {
@@ -91,6 +90,11 @@ export default defineEventHandler(async (event) => {
         fullName: data.full_name,
         plan: data.plan,
         expiryDate: data.expiry_date ?? 'unknown',
+      })
+      await sendCertificationEmail({
+        to: data.email,
+        fullName: data.full_name,
+        plan: data.plan,
       })
     } else if (status === 'rejected') {
       await sendMembershipRejectedEmail({
@@ -102,11 +106,10 @@ export default defineEventHandler(async (event) => {
     emailSent = true
   } catch (err) {
     console.error(`[Membership] Failed to send ${status} email:`, err)
-    emailError = err instanceof Error ? err.message : String(err)
   }
 
   return {
-    message: `Payment ${status === 'approved' ? 'approved' : status === 'partial' ? 'marked as partial' : 'rejected'} successfully.${status === 'approved' ? ' Client session created.' : ''}${emailSent ? ` Email sent.` : emailError ? ` Email could not be sent: ${emailError}` : ''}`,
+    message: `Payment ${status === 'approved' ? 'approved' : status === 'partial' ? 'marked as partial' : 'rejected'} successfully.${status === 'approved' ? ' Client session created.' : ''}${emailSent ? ' Email sent.' : ''}`,
     emailSent,
     payment: {
       id: data.id,

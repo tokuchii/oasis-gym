@@ -3,12 +3,12 @@ import { checkRateLimit } from '~/server/utils/walkin'
 
 export default defineEventHandler(async (event) => {
   const ip = getRequestHeader(event, 'x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
-  const rateError = checkRateLimit(`ocr:${ip}`, 10, 300000)
+  const rateError = checkRateLimit(`ocr:${ip}`, 5, 300000)
   if (rateError) throw createError({ statusCode: 429, statusMessage: rateError })
 
-  const apiKey = process.env.GEMINI_API_KEY
+  const apiKey = useRuntimeConfig(event).geminiApiKey
   if (!apiKey) {
-    throw createError({ statusCode: 500, statusMessage: 'OCR service unavailable.' })
+    throw createError({ statusCode: 503, statusMessage: 'OCR service unavailable.' })
   }
 
   const formData = await readMultipartFormData(event)

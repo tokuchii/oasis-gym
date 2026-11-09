@@ -3,7 +3,7 @@ import { resolve } from 'path'
 import { createWorker } from 'tesseract.js'
 import { extractRefFromText } from '../composables/useReceiptOcr'
 
-const imagePath = resolve(__dirname, '../composables/8fc2effb-a554-4e8c-bdfb-8c81b5c54a5f.jpg')
+const imagePath = resolve(__dirname, './fixtures/real-receipt.jpg')
 
 describe('Real receipt OCR test', () => {
   it('extracts text from receipt image and finds reference number', async () => {

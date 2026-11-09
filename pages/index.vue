@@ -1,14 +1,7 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
-import { MEMBERSHIP_PLANS, MEMBERSHIP_PLANS_DISPLAY } from '~/types/walkin'
-import { extractRefFromReceipt } from '~/composables/useReceiptOcr'
-import { useToast } from '~/composables/useToast'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { MEMBERSHIP_PLANS_DISPLAY } from '~/types/walkin'
 import { getApiBase } from '~/composables/useApiBase'
-import { useCachedFetch } from '~/composables/useCachedFetch'
-import { generateWalkinQrDataUrl } from '~/composables/useWalkinPass'
-
-const toast = useToast()
-const { cachedPost } = useCachedFetch()
 
 function apiUrl(path: string): string {
   const base = getApiBase()
@@ -24,7 +17,6 @@ const navLinks = [
   { label: 'Gallery', href: '#gallery' },
   { label: 'Membership', href: '#membership' },
   { label: 'Coaches', href: '#coaches' },
-  { label: 'Register', href: '#register' },
   { label: 'Location', href: '#location' },
 ]
 
@@ -53,15 +45,14 @@ const features = [
 ]
 
 const galleryZones = [
-  { name: 'Main Floor', desc: 'Strength & functional training' },
-  { name: 'Cardio Zone', desc: 'Treadmills, bikes & rowers' },
-  { name: 'Free Weights', desc: 'Dumbbells, barbells & racks' },
-  { name: 'Group Studio', desc: 'HIIT, yoga & spin classes' },
-  { name: 'Locker Room', desc: 'Showers & secure storage' },
-  { name: 'Reception', desc: 'Front desk & lounge area' },
+  { name: 'Main Floor', desc: 'Strength & functional training', img: '/gallery/main-floor.jpg' },
+  { name: 'Cardio Zone', desc: 'Treadmills, bikes & rowers', img: '/gallery/cardio-zone.jpg' },
+  { name: 'Free Weights', desc: 'Dumbbells, barbells & racks', img: '/gallery/free-weights.jpg' },
+  { name: 'Group Studio', desc: 'HIIT, yoga & spin classes', img: '/gallery/group-studio.jpg' },
+  { name: 'Locker Room', desc: 'Showers & secure storage', img: '/gallery/locker-room.jpg' },
+  { name: 'Reception', desc: 'Front desk & lounge area', img: '/gallery/reception.jpg' },
 ]
 
-const membershipPlans = MEMBERSHIP_PLANS
 const membershipPlansDisplay = MEMBERSHIP_PLANS_DISPLAY
 
 const operatingHours = [
@@ -89,52 +80,6 @@ function dismissPromo() {
   sessionStorage.setItem('promo_dismissed', '1')
 }
 
-const paymentForm = reactive({
-  fullName: '',
-  email: '',
-  phone: '',
-  plan: '',
-  coach: '',
-  paymentMethod: 'gcash',
-  referenceNo: '',
-  amount: '',
-  notes: '',
-})
-const paymentFormHoneypot = ref('')
-const paymentFormLoadedAt = Date.now()
-
-watch(() => paymentForm.plan, (newPlan) => {
-  const found = MEMBERSHIP_PLANS.find((p) => p.name === newPlan)
-  if (found) {
-    paymentForm.amount = found.price.replace(/,/g, '')
-  }
-})
-
-const paymentReceipt = ref<File | null>(null)
-const receiptPreviewUrl = ref('')
-const ocrLoading = ref(false)
-const ocrMessage = ref('')
-const paymentErrors = reactive<Record<string, string>>({})
-const showPaymentConfirm = ref(false)
-const showWalkinConfirm = ref(false)
-const paymentSubmitting = ref(false)
-const walkinSubmitting = ref(false)
-
-const walkinForm = reactive({
-  fullName: '',
-  email: '',
-  phone: '',
-  emergencyContact: '',
-  waiverAccepted: false,
-})
-const walkinFormHoneypot = ref('')
-const walkinFormLoadedAt = Date.now()
-const walkinErrors = reactive<Record<string, string>>({})
-const walkinSuccess = ref(false)
-const walkinPassCode = ref('')
-const walkinQrDataUrl = ref('')
-const walkinSubmitError = ref('')
-
 const coachesList = ref<{ id: string; fullName: string; specialty: string | null; bio: string | null; photoUrl: string | null }[]>([])
 
 const heroRef = ref<HTMLElement | null>(null)
@@ -156,324 +101,6 @@ function scrollToTop() {
 
 function handleScroll() {
   showScrollTop.value = window.scrollY > 400
-}
-
-function validatePaymentForm(): boolean {
-  Object.keys(paymentErrors).forEach((k) => delete paymentErrors[k])
-  let valid = true
-
-  if (paymentFormHoneypot.value) return true
-  if (Date.now() - paymentFormLoadedAt < 3000) {
-    paymentErrors.submit = 'Form submitted too fast. Please try again.'
-    return false
-  }
-
-  const name = paymentForm.fullName.trim()
-  if (!name) {
-    paymentErrors.fullName = 'Full name is required'
-    valid = false
-  } else if (name.length < 2) {
-    paymentErrors.fullName = 'Full name must be at least 2 characters'
-    valid = false
-  } else if (name.length > 100) {
-    paymentErrors.fullName = 'Full name is too long (max 100 characters)'
-    valid = false
-  }
-
-  const email = paymentForm.email.trim()
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    paymentErrors.email = 'Valid email is required'
-    valid = false
-  } else if (email.length > 254) {
-    paymentErrors.email = 'Email is too long'
-    valid = false
-  }
-
-  const phone = paymentForm.phone.trim()
-  if (!phone) {
-    paymentErrors.phone = 'Phone number is required'
-    valid = false
-  } else if (!/^(\+639|09)\d{9}$/.test(phone)) {
-    paymentErrors.phone = 'Enter a valid Philippine mobile number (+639XXXXXXXXX)'
-    valid = false
-  }
-
-  if (!paymentForm.plan) {
-    paymentErrors.plan = 'Please select a plan'
-    valid = false
-  }
-
-  const ref = paymentForm.referenceNo.trim()
-  if (!ref) {
-    paymentErrors.referenceNo = 'Reference number is required — type it or upload receipt to auto-fill'
-    valid = false
-  } else if (ref.length > 40) {
-    paymentErrors.referenceNo = 'Reference number is too long (max 40 characters)'
-    valid = false
-  }
-
-  if (!paymentForm.amount.trim()) {
-    paymentErrors.amount = 'Amount is required'
-    valid = false
-  } else if (!/^\d{1,6}(\.\d{1,2})?$/.test(paymentForm.amount.trim())) {
-    paymentErrors.amount = 'Enter a valid amount (e.g. 1499 or 1499.50)'
-    valid = false
-  } else {
-    const amt = parseFloat(paymentForm.amount.trim())
-    if (amt <= 0 || amt > 100000) {
-      paymentErrors.amount = 'Amount must be between ₱1 and ₱100,000'
-      valid = false
-    }
-  }
-
-  if (!paymentReceipt.value) {
-    paymentErrors.receipt = 'Payment receipt is required'
-    valid = false
-  }
-
-  return valid
-}
-
-function validateWalkinForm(): boolean {
-  Object.keys(walkinErrors).forEach((k) => delete walkinErrors[k])
-  let valid = true
-
-  if (walkinFormHoneypot.value) return true
-  if (Date.now() - walkinFormLoadedAt < 3000) {
-    walkinErrors.submit = 'Form submitted too fast. Please try again.'
-    return false
-  }
-
-  const name = walkinForm.fullName.trim()
-  if (!name) {
-    walkinErrors.fullName = 'Full name is required'
-    valid = false
-  } else if (name.length < 2) {
-    walkinErrors.fullName = 'Full name must be at least 2 characters'
-    valid = false
-  } else if (name.length > 100) {
-    walkinErrors.fullName = 'Full name is too long (max 100 characters)'
-    valid = false
-  }
-
-  const email = walkinForm.email.trim()
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    walkinErrors.email = 'Valid email is required'
-    valid = false
-  } else if (email.length > 254) {
-    walkinErrors.email = 'Email is too long'
-    valid = false
-  }
-
-  const phone = walkinForm.phone.trim()
-  if (!phone) {
-    walkinErrors.phone = 'Phone number is required'
-    valid = false
-  } else if (!/^(\+639|09)\d{9}$/.test(phone)) {
-    walkinErrors.phone = 'Enter a valid Philippine mobile number (+639XXXXXXXXX)'
-    valid = false
-  }
-
-  const emergency = walkinForm.emergencyContact.trim()
-  if (!emergency) {
-    walkinErrors.emergencyContact = 'Emergency contact is required'
-    valid = false
-  } else if (emergency.length < 2) {
-    walkinErrors.emergencyContact = 'Emergency contact must be at least 2 characters'
-    valid = false
-  } else if (emergency.length > 100) {
-    walkinErrors.emergencyContact = 'Emergency contact is too long (max 100 characters)'
-    valid = false
-  }
-
-  if (!walkinForm.waiverAccepted) {
-    walkinErrors.waiver = 'You must accept the waiver to continue'
-    valid = false
-  }
-
-  return valid
-}
-
-function formatPhone(phone: string): string {
-  const cleaned = phone.replace(/[\s\-()]/g, '')
-  if (!cleaned) return ''
-  if (cleaned.startsWith('+639') && cleaned.length === 13) return cleaned
-  if (cleaned.startsWith('639') && cleaned.length === 12) return '+' + cleaned
-  if (cleaned.startsWith('09') && cleaned.length === 11) return '+63' + cleaned.slice(1)
-  if (/^\d{10}$/.test(cleaned)) return '+63' + cleaned
-  return cleaned
-}
-
-function handleReceiptChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0] ?? null
-  if (!file) {
-    paymentReceipt.value = null
-    receiptPreviewUrl.value = ''
-    return
-  }
-  const maxSize = 5 * 1024 * 1024
-  if (file.size > maxSize) {
-    paymentErrors.receipt = 'File must be under 5MB'
-    input.value = ''
-    return
-  }
-  const allowed = ['image/jpeg', 'image/jpg']
-  if (!allowed.includes(file.type)) {
-    paymentErrors.receipt = 'Only JPEG images are accepted'
-    input.value = ''
-    return
-  }
-  delete paymentErrors.receipt
-  paymentReceipt.value = file
-  if (file.type.startsWith('image/')) {
-    receiptPreviewUrl.value = URL.createObjectURL(file)
-  } else {
-    receiptPreviewUrl.value = ''
-  }
-
-  ocrLoading.value = true
-  ocrMessage.value = 'Scanning receipt for reference number...'
-  extractRefFromReceipt(file).then((ref) => {
-    if (ref) {
-      paymentForm.referenceNo = ref
-      ocrMessage.value = `Reference number detected: ${ref}`
-      toast.success(`Reference number detected: ${ref}`)
-    } else {
-      ocrMessage.value = 'Could not detect reference number. Please enter it manually.'
-      toast.warning('Could not detect reference number. Please type it manually.')
-    }
-  }).catch(() => {
-    ocrMessage.value = 'Could not scan receipt. Please enter reference number manually.'
-    toast.error('Could not scan receipt. Please enter reference number manually.')
-  }).finally(() => {
-    ocrLoading.value = false
-  })
-}
-
-function onPaymentSubmit() {
-  if (validatePaymentForm()) showPaymentConfirm.value = true
-}
-
-function onWalkinSubmit() {
-  if (validateWalkinForm()) showWalkinConfirm.value = true
-}
-
-async function submitPaymentForm() {
-  if (!validatePaymentForm()) return
-
-  paymentSubmitting.value = true
-  try {
-    const formData = new FormData()
-    formData.append('fullName', paymentForm.fullName)
-    formData.append('email', paymentForm.email)
-    formData.append('phone', paymentForm.phone)
-    formData.append('plan', paymentForm.plan)
-    formData.append('coach', paymentForm.coach)
-    formData.append('paymentMethod', paymentForm.paymentMethod)
-    formData.append('referenceNo', paymentForm.referenceNo)
-    formData.append('amount', paymentForm.amount)
-    if (paymentReceipt.value) {
-      formData.append('receipt', paymentReceipt.value)
-    }
-
-    const api = useApi()
-    await api(apiUrl('/api/membership/submit'), {
-      method: 'POST',
-      body: formData,
-    })
-    toast.success('Payment submitted! A certification email has been sent to your email.')
-
-    Object.assign(paymentForm, {
-      fullName: '',
-      email: '',
-      phone: '',
-      plan: '',
-      coach: '',
-      paymentMethod: 'gcash',
-      referenceNo: '',
-      amount: '',
-      notes: '',
-    })
-    paymentReceipt.value = null
-    receiptPreviewUrl.value = ''
-  } catch (err: unknown) {
-    const fetchErr = err as { data?: { statusMessage?: string } }
-    toast.error(fetchErr.data?.statusMessage ?? 'Submission failed. Please try again.')
-  } finally {
-    paymentSubmitting.value = false
-  }
-}
-
-async function submitWalkinForm() {
-  walkinSuccess.value = false
-  walkinSubmitError.value = ''
-  walkinPassCode.value = ''
-  walkinQrDataUrl.value = ''
-  if (!validateWalkinForm()) return
-
-  walkinSubmitting.value = true
-  try {
-    const data = await cachedPost<{
-      passCode: string
-      qrPayload: string
-      fullName: string
-      visitDate: string
-      duplicate?: boolean
-    }>('/api/walkin/register', {
-      fullName: walkinForm.fullName,
-      email: walkinForm.email,
-      phone: walkinForm.phone,
-      emergencyContact: walkinForm.emergencyContact,
-    }, {
-      label: `Register ${walkinForm.fullName}`,
-      cacheInvalidates: ['passes'],
-    })
-
-    walkinPassCode.value = data.passCode
-    try {
-      walkinQrDataUrl.value = await generateWalkinQrDataUrl(data.qrPayload)
-    } catch {
-      walkinQrDataUrl.value = ''
-    }
-    walkinSuccess.value = true
-
-    if (data.duplicate) {
-      toast.warning('This phone is already registered. Showing your existing pass.')
-    }
-
-    Object.assign(walkinForm, {
-      fullName: '',
-      email: '',
-      phone: '',
-      emergencyContact: '',
-      waiverAccepted: false,
-    })
-  } catch (err: unknown) {
-    const msg = (err as { message?: string }).message ?? ''
-    if (msg === 'Queued for sync') {
-      toast.success('Registration saved offline. It will sync when you reconnect.')
-      Object.assign(walkinForm, {
-        fullName: '',
-        email: '',
-        phone: '',
-        emergencyContact: '',
-        waiverAccepted: false,
-      })
-    } else {
-      const fetchErr = err as { data?: { statusMessage?: string } }
-      toast.error(fetchErr.data?.statusMessage ?? 'Registration failed. Please try again.')
-    }
-  } finally {
-    walkinSubmitting.value = false
-  }
-}
-
-function resetWalkinSuccess() {
-  walkinSuccess.value = false
-  walkinPassCode.value = ''
-  walkinQrDataUrl.value = ''
-  walkinSubmitError.value = ''
 }
 
 onMounted(async () => {
@@ -557,8 +184,6 @@ onUnmounted(() => {
           </li>
         </ul>
 
-        <a href="#register" class="hidden lg:inline-flex btn-primary text-xs">Join Now</a>
-
         <button
           type="button"
           class="lg:hidden p-2 text-cream"
@@ -587,7 +212,6 @@ onUnmounted(() => {
         >
           {{ link.label }}
         </a>
-        <a href="#register" class="btn-primary w-full text-xs mt-2" @click="closeMobileMenu">Join Now</a>
       </div>
     </header>
 
@@ -685,16 +309,23 @@ onUnmounted(() => {
           <div
             v-for="zone in galleryZones"
             :key="zone.name"
-            class="reveal group relative aspect-[4/3] overflow-hidden border border-iron"
+            class="group relative aspect-[4/3] overflow-hidden border border-iron"
           >
-            <div class="w-full h-full bg-graphite flex flex-col items-center justify-center group-hover:scale-105 transition-transform duration-500">
-              <svg class="w-10 h-10 sm:w-16 sm:h-16 text-iron mb-2 sm:mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              <span class="font-display text-cream text-base sm:text-xl tracking-wide">{{ zone.name }}</span>
+            <img
+              :src="zone.img"
+              :alt="zone.name"
+              class="absolute inset-0 w-full h-full object-cover brightness-110 transition-transform duration-500 group-hover:scale-105"
+              loading="lazy"
+              decoding="async"
+              width="800"
+              height="600"
+            />
+            <div class="absolute inset-0 bg-gradient-to-b from-onyx/70 via-transparent to-onyx/70" />
+            <div class="absolute inset-x-0 top-0 p-2.5 sm:p-4">
+              <span class="font-display text-cream text-base sm:text-xl tracking-wide drop-shadow-lg">{{ zone.name }}</span>
             </div>
-            <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-onyx/90 to-transparent p-2.5 sm:p-4 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
-              <p class="text-mist text-[11px] sm:text-sm">{{ zone.desc }}</p>
+            <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-onyx/95 to-transparent p-2.5 sm:p-4 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
+              <p class="text-cream/90 text-[11px] sm:text-sm">{{ zone.desc }}</p>
             </div>
           </div>
         </div>
@@ -765,371 +396,18 @@ onUnmounted(() => {
                 {{ feat }}
               </li>
             </ul>
-            <a href="#register" class="btn-outline w-full text-center text-[11px] sm:text-xs">Choose Plan</a>
+            <a
+              href="https://m.me/oasisfitness.calauan"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-outline w-full text-center text-[11px] sm:text-xs"
+            >
+              Choose Plan
+            </a>
           </div>
         </div>
       </div>
     </section>
-
-    <!-- Register / Forms -->
-    <section id="register" class="py-10 sm:py-20 lg:py-32 bg-obsidian/50">
-      <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-        <div class="text-center mb-6 sm:mb-12 reveal">
-          <p class="section-label mb-2 sm:mb-3">Sign Up</p>
-          <h2 class="section-title mb-2 sm:mb-4">GET STARTED</h2>
-          <p class="text-mist text-[13px] sm:text-sm md:text-base max-w-xl mx-auto">Register for a permanent walk-in pass or subscribe to a membership plan.</p>
-        </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-8 lg:gap-12">
-          <!-- Payment Form -->
-          <div class="reveal card p-4 sm:p-6 lg:p-8">
-            <h3 class="font-display text-lg sm:text-2xl text-cream tracking-wide mb-1 sm:mb-2">Membership Payment</h3>
-            <p class="text-mist text-[11px] sm:text-sm mb-3 sm:mb-5">
-              Choose a plan, pay via GCash or bank transfer, then upload your receipt.
-            </p>
-
-            <!-- Payment Info -->
-            <div class="bg-graphite/50 border border-iron rounded-sm p-2.5 sm:p-4 mb-3 sm:mb-5 text-[11px] sm:text-sm space-y-0.5">
-              <p><span class="text-mist">GCash:</span> <span class="text-cream font-medium">09XX XXX XXXX</span></p>
-              <p><span class="text-mist">Bank:</span> <span class="text-cream font-medium">Account # XXX-XXX-XXX</span></p>
-            </div>
-
-            <form class="space-y-3 sm:space-y-5" @submit.prevent="onPaymentSubmit">
-              <!-- Plan Selection as Cards -->
-              <div>
-                <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">1. Select Plan *</label>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
-                  <label
-                    v-for="plan in membershipPlans"
-                    :key="plan.name"
-                    class="relative flex flex-col items-center text-center cursor-pointer p-3 sm:p-4 border-2 transition-all rounded-sm"
-                    :class="paymentForm.plan === plan.name
-                      ? 'border-gold bg-gold/5 shadow-lg shadow-gold/10'
-                      : 'border-iron hover:border-gold/40 bg-graphite/30'"
-                  >
-                    <input
-                      v-model="paymentForm.plan"
-                      type="radio"
-                      :value="plan.name"
-                      class="sr-only"
-                    />
-                    <span v-if="plan.featured" class="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-gold text-onyx text-[8px] sm:text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm">Popular</span>
-                    <span class="font-display text-xl sm:text-2xl text-cream tracking-wide">{{ plan.name }}</span>
-                    <span class="text-gold font-display text-base sm:text-lg mt-0.5">₱{{ plan.price }}<span class="text-mist text-[10px] sm:text-xs font-body">{{ plan.period }}</span></span>
-                  </label>
-                </div>
-                <p v-if="paymentErrors.plan" class="text-red-400 text-[10px] sm:text-xs mt-1">{{ paymentErrors.plan }}</p>
-              </div>
-
-              <!-- Personal Info -->
-              <div>
-                <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">2. Your Details</label>
-                <div class="space-y-2.5 sm:space-y-3">
-                  <div>
-                    <label for="pay-name" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Full Name *</label>
-                    <input id="pay-name" v-model="paymentForm.fullName" type="text" class="input-field" maxlength="100" placeholder="Juan Dela Cruz" />
-                    <p v-if="paymentErrors.fullName" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.fullName }}</p>
-                  </div>
-                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
-                    <div>
-                      <label for="pay-email" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Email *</label>
-                      <input id="pay-email" v-model="paymentForm.email" type="email" class="input-field" placeholder="you@email.com" />
-                      <p v-if="paymentErrors.email" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.email }}</p>
-                    </div>
-                    <div>
-                      <label for="pay-phone" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Phone *</label>
-                      <input id="pay-phone" v-model="paymentForm.phone" type="tel" class="input-field" maxlength="13" placeholder="+639XXXXXXXXX" @blur="paymentForm.phone = formatPhone(paymentForm.phone)" />
-                      <p v-if="paymentErrors.phone" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.phone }}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Coach -->
-              <div>
-                <label for="pay-coach" class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">3. Preferred Coach (optional)</label>
-                <select id="pay-coach" v-model="paymentForm.coach" class="input-field">
-                  <option value="">No preference</option>
-                  <option v-for="coach in coachesList" :key="coach.id" :value="coach.fullName">
-                    {{ coach.fullName }}{{ coach.specialty ? ` — ${coach.specialty}` : '' }}
-                  </option>
-                </select>
-                <p v-if="coachesList.length === 0" class="text-mist text-[10px] sm:text-xs mt-0.5 italic">No coaches available yet.</p>
-              </div>
-
-              <!-- Payment Method -->
-              <div>
-                <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">4. Payment Method *</label>
-                <div class="flex gap-3 sm:gap-4">
-                  <label class="flex items-center gap-1.5 sm:gap-2 cursor-pointer">
-                    <input v-model="paymentForm.paymentMethod" type="radio" value="gcash" class="accent-gold" />
-                    <span class="text-[11px] sm:text-sm text-cream">GCash</span>
-                  </label>
-                  <label class="flex items-center gap-1.5 sm:gap-2 cursor-pointer">
-                    <input v-model="paymentForm.paymentMethod" type="radio" value="bank" class="accent-gold" />
-                    <span class="text-[11px] sm:text-sm text-cream">Bank Transfer</span>
-                  </label>
-                </div>
-              </div>
-
-              <!-- Reference + Amount -->
-              <div>
-                <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">5. Payment Details</label>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
-                  <div>
-                    <label for="pay-ref" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Reference No. *</label>
-                    <input id="pay-ref" v-model="paymentForm.referenceNo" type="text" class="input-field" :class="paymentReceipt && (ocrLoading || paymentForm.referenceNo) ? 'bg-graphite/50 cursor-not-allowed opacity-60' : ''" :readonly="!!paymentReceipt && (ocrLoading || !!paymentForm.referenceNo)" :disabled="!!paymentReceipt && (ocrLoading || !!paymentForm.referenceNo)" :placeholder="paymentReceipt ? (paymentForm.referenceNo ? 'Scanned from receipt...' : 'Type reference number...') : 'Upload receipt to auto-fill'" />
-                    <p v-if="paymentReceipt && ocrLoading" class="text-gold text-[9px] sm:text-[10px] mt-0.5">Scanning receipt...</p>
-                    <p v-else-if="paymentReceipt && paymentForm.referenceNo" class="text-green-400 text-[9px] sm:text-[10px] mt-0.5">Auto-filled from receipt</p>
-                    <p v-else-if="paymentReceipt && !paymentForm.referenceNo" class="text-yellow-400 text-[9px] sm:text-[10px] mt-0.5">Could not detect ref. no — type it manually below</p>
-                    <p v-else class="text-mist/50 text-[9px] sm:text-[10px] mt-0.5">Upload receipt below to auto-fill</p>
-                    <p v-if="paymentErrors.referenceNo" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.referenceNo }}</p>
-                  </div>
-                  <div>
-                    <label for="pay-amount" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Amount Paid *</label>
-                    <div class="relative">
-                      <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gold text-sm font-display">₱</span>
-                      <input id="pay-amount" v-model="paymentForm.amount" type="text" class="input-field pl-7 bg-graphite/50 cursor-not-allowed opacity-60" placeholder="Select a plan" readonly disabled />
-                    </div>
-                    <p v-if="paymentErrors.amount" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ paymentErrors.amount }}</p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Receipt Upload with Preview -->
-              <div>
-                <label class="block text-[11px] sm:text-sm text-mist mb-1.5 sm:mb-2">6. Upload Receipt *</label>
-                <label
-                  for="pay-receipt"
-                  class="flex flex-col items-center justify-center cursor-pointer border-2 border-dashed transition-all rounded-sm p-4 sm:p-6"
-                  :class="paymentReceipt
-                    ? 'border-gold bg-gold/5'
-                    : 'border-iron hover:border-gold/40 bg-graphite/30'"
-                >
-                  <template v-if="paymentReceipt">
-                    <div class="relative w-full">
-                        <img
-                        v-if="paymentReceipt.type.startsWith('image/')"
-                        :src="receiptPreviewUrl"
-                        alt="Receipt preview"
-                        class="max-h-40 sm:max-h-48 mx-auto rounded-sm object-contain"
-                        decoding="async"
-                      />
-                      <div v-else class="flex items-center gap-2 justify-center py-4">
-                        <span class="text-2xl">📄</span>
-                        <span class="text-cream text-xs sm:text-sm">{{ paymentReceipt.name }}</span>
-                      </div>
-                      <button
-                        type="button"
-                        class="absolute top-1 right-1 bg-onyx/80 text-mist hover:text-cream w-6 h-6 flex items-center justify-center rounded-full text-xs"
-                        @click.prevent="paymentReceipt = null; receiptPreviewUrl = ''; paymentForm.referenceNo = ''; ocrMessage = ''"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                    <p class="text-gold text-[10px] sm:text-xs mt-2">Change file</p>
-                  </template>
-                  <template v-else>
-                    <svg class="w-8 h-8 sm:w-10 sm:h-10 text-mist/50 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                    </svg>
-                    <p class="text-cream text-[11px] sm:text-sm font-medium">Tap to upload your GCash/bank receipt</p>
-                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">JPEG only — max 5MB</p>
-                  </template>
-                </label>
-                <input
-                  id="pay-receipt"
-                  type="file"
-                  accept="image/jpeg,image/jpg"
-                  class="sr-only"
-                  @change="handleReceiptChange"
-                />
-                <p v-if="paymentErrors.receipt" class="text-red-400 text-[10px] sm:text-xs mt-1">{{ paymentErrors.receipt }}</p>
-              </div>
-
-              <!-- Notes -->
-              <div>
-                <label for="pay-notes" class="block text-[10px] sm:text-xs text-mist/70 mb-0.5">Notes (optional)</label>
-                <textarea id="pay-notes" v-model="paymentForm.notes" rows="2" class="input-field resize-none" placeholder="Any additional info..." />
-              </div>
-
-              <div class="absolute left-[-9999px]" aria-hidden="true">
-                <label for="pay-website">Website</label>
-                <input id="pay-website" v-model="paymentFormHoneypot" type="text" tabindex="-1" autocomplete="off" />
-              </div>
-
-              <button type="submit" class="btn-primary w-full py-3" :disabled="paymentSubmitting">
-                <span v-if="paymentSubmitting" class="inline-flex items-center gap-2">
-                  <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Submitting…
-                </span>
-                <span v-else>Submit Payment</span>
-              </button>
-            </form>
-          </div>
-
-          <!-- Walk-in Form -->
-          <div class="reveal card p-4 sm:p-6 lg:p-8">
-            <h3 class="font-display text-lg sm:text-2xl text-cream tracking-wide mb-1 sm:mb-2">Walk-in Registration</h3>
-            <p class="text-mist text-[11px] sm:text-sm mb-3 sm:mb-6">
-              Register once to get a permanent QR code. Show it at the gym every visit — no need to register again.
-            </p>
-
-            <form v-if="!walkinSuccess" class="space-y-2.5 sm:space-y-4" @submit.prevent="onWalkinSubmit">
-              <div>
-                <label for="walk-name" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Full Name *</label>
-                <input id="walk-name" v-model="walkinForm.fullName" type="text" class="input-field" maxlength="100" />
-                <p v-if="walkinErrors.fullName" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ walkinErrors.fullName }}</p>
-              </div>
-
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-4">
-                <div>
-                  <label for="walk-email" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Email *</label>
-                  <input id="walk-email" v-model="walkinForm.email" type="email" class="input-field" />
-                  <p v-if="walkinErrors.email" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ walkinErrors.email }}</p>
-                </div>
-                <div>
-                  <label for="walk-phone" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Phone *</label>
-                  <input id="walk-phone" v-model="walkinForm.phone" type="tel" class="input-field" maxlength="13" placeholder="+639XXXXXXXXX" @blur="walkinForm.phone = formatPhone(walkinForm.phone)" />
-                  <p v-if="walkinErrors.phone" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ walkinErrors.phone }}</p>
-                </div>
-              </div>
-
-              <div>
-                <label for="walk-emergency" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Emergency Contact *</label>
-                <input id="walk-emergency" v-model="walkinForm.emergencyContact" type="text" class="input-field" maxlength="100" placeholder="Name & phone number" />
-                <p v-if="walkinErrors.emergencyContact" class="text-red-400 text-[10px] sm:text-xs mt-0.5">{{ walkinErrors.emergencyContact }}</p>
-              </div>
-
-              <div class="bg-graphite/50 border border-iron rounded-sm p-2.5 sm:p-4 text-[10px] sm:text-xs text-mist leading-relaxed max-h-24 sm:max-h-32 overflow-y-auto">
-                <p class="font-semibold text-cream mb-1.5 sm:mb-2">Waiver & Release of Liability</p>
-                <p>
-                  I acknowledge that participation in physical exercise involves inherent risks including injury or death.
-                  I voluntarily assume all such risks and release OASIS FITNESS GYM, its owners, employees, and agents
-                  from any liability arising from my use of the facilities. I confirm I am physically fit to participate
-                  or have consulted a physician. I agree to follow all gym rules and safety guidelines.
-                </p>
-              </div>
-
-              <label class="flex items-start gap-2 sm:gap-3 cursor-pointer">
-                <input v-model="walkinForm.waiverAccepted" type="checkbox" class="mt-0.5 sm:mt-1 accent-gold" />
-                <span class="text-[11px] sm:text-sm text-mist">I have read and agree to the waiver above *</span>
-              </label>
-              <p v-if="walkinErrors.waiver" class="text-red-400 text-[10px] sm:text-xs">{{ walkinErrors.waiver }}</p>
-
-              <div class="absolute left-[-9999px]" aria-hidden="true">
-                <label for="walk-website">Website</label>
-                <input id="walk-website" v-model="walkinFormHoneypot" type="text" tabindex="-1" autocomplete="off" />
-              </div>
-
-              <button type="submit" class="btn-primary w-full" :disabled="walkinSubmitting">
-                <span v-if="walkinSubmitting" class="inline-flex items-center gap-2">
-                  <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Registering…
-                </span>
-                <span v-else>Register Walk-in</span>
-              </button>
-            </form>
-
-            <div v-else class="text-center space-y-3 sm:space-y-6 py-3 sm:py-4">
-              <div class="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 border border-gold/30 rounded-full">
-                <span class="text-gold text-lg sm:text-2xl">✓</span>
-              </div>
-              <div>
-                <h4 class="font-display text-lg sm:text-2xl text-cream tracking-wide mb-1 sm:mb-2">Walk-in Account Created</h4>
-                <p class="text-mist text-[11px] sm:text-sm">
-                  Your QR code is permanent. Show it at the gym every visit — no need to register again.
-                </p>
-              </div>
-              <div v-if="walkinQrDataUrl" class="inline-block p-2.5 sm:p-4 bg-cream rounded-sm">
-                <img :src="walkinQrDataUrl" alt="Permanent walk-in QR code" class="w-44 h-44 sm:w-60 sm:h-60" width="240" height="240" decoding="async" />
-              </div>
-              <div>
-                <p class="text-mist text-[9px] sm:text-xs uppercase tracking-wider mb-0.5 sm:mb-1">Permanent Pass Code</p>
-                <p class="font-display text-xl sm:text-3xl text-gold tracking-widest">{{ walkinPassCode }}</p>
-              </div>
-              <p class="text-mist text-[9px] sm:text-xs">Save this QR code and pass code. You'll need them for every visit.</p>
-              <button type="button" class="btn-outline w-full" @click="resetWalkinSuccess">
-                Register Another
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Payment Confirmation Modal -->
-    <div v-if="showPaymentConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-onyx/90 backdrop-blur-sm" @click.self="showPaymentConfirm = false">
-      <div class="bg-graphite border border-iron rounded-sm max-w-sm w-full p-5 sm:p-6 space-y-4">
-        <div class="text-center">
-          <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gold/10 border border-gold/30 mb-3">
-            <span class="text-gold text-xl">💳</span>
-          </div>
-          <h4 class="font-display text-lg sm:text-xl text-cream tracking-wide">Confirm Payment</h4>
-          <p class="text-mist text-[11px] sm:text-sm mt-1">Please review your details before submitting.</p>
-        </div>
-        <div class="space-y-1.5 text-[11px] sm:text-sm">
-          <div class="flex justify-between"><span class="text-mist">Plan</span><span class="text-cream font-medium">{{ paymentForm.plan }}</span></div>
-          <div class="flex justify-between"><span class="text-mist">Amount</span><span class="text-gold font-display text-base">₱{{ paymentForm.amount }}</span></div>
-          <div class="flex justify-between"><span class="text-mist">Name</span><span class="text-cream font-medium text-right">{{ paymentForm.fullName }}</span></div>
-          <div class="flex justify-between"><span class="text-mist">Phone</span><span class="text-cream font-medium">{{ paymentForm.phone }}</span></div>
-          <div v-if="paymentForm.coach" class="flex justify-between"><span class="text-mist">Coach</span><span class="text-cream font-medium">{{ paymentForm.coach }}</span></div>
-          <div class="flex justify-between"><span class="text-mist">Method</span><span class="text-cream font-medium uppercase">{{ paymentForm.paymentMethod }}</span></div>
-          <div class="flex justify-between"><span class="text-mist">Ref No.</span><span class="text-cream font-medium">{{ paymentForm.referenceNo }}</span></div>
-        </div>
-        <div class="flex gap-2">
-          <button type="button" class="btn-outline flex-1" @click="showPaymentConfirm = false">Cancel</button>
-          <button type="button" class="btn-primary flex-1" :disabled="paymentSubmitting" @click="showPaymentConfirm = false; submitPaymentForm()">
-            <span v-if="paymentSubmitting" class="inline-flex items-center gap-2">
-              <svg class="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Submitting…
-            </span>
-            <span v-else>Confirm & Submit</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Walk-in Confirmation Modal -->
-    <div v-if="showWalkinConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-onyx/90 backdrop-blur-sm" @click.self="showWalkinConfirm = false">
-      <div class="bg-graphite border border-iron rounded-sm max-w-sm w-full p-5 sm:p-6 space-y-4">
-        <div class="text-center">
-          <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gold/10 border border-gold/30 mb-3">
-            <span class="text-gold text-xl">📋</span>
-          </div>
-          <h4 class="font-display text-lg sm:text-xl text-cream tracking-wide">Confirm Registration</h4>
-          <p class="text-mist text-[11px] sm:text-sm mt-1">Is your information correct?</p>
-        </div>
-        <div class="space-y-1.5 text-[11px] sm:text-sm">
-          <div class="flex justify-between"><span class="text-mist">Name</span><span class="text-cream font-medium text-right">{{ walkinForm.fullName }}</span></div>
-          <div class="flex justify-between"><span class="text-mist">Email</span><span class="text-cream font-medium text-right">{{ walkinForm.email }}</span></div>
-          <div class="flex justify-between"><span class="text-mist">Phone</span><span class="text-cream font-medium">{{ walkinForm.phone }}</span></div>
-          <div class="flex justify-between"><span class="text-mist">Emergency</span><span class="text-cream font-medium text-right">{{ walkinForm.emergencyContact }}</span></div>
-        </div>
-        <div class="flex gap-2">
-          <button type="button" class="btn-outline flex-1" @click="showWalkinConfirm = false">Cancel</button>
-          <button type="button" class="btn-primary flex-1" :disabled="walkinSubmitting" @click="showWalkinConfirm = false; submitWalkinForm()">
-            <span v-if="walkinSubmitting" class="inline-flex items-center gap-2">
-              <svg class="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Registering…
-            </span>
-            <span v-else>Confirm & Register</span>
-          </button>
-        </div>
-      </div>
-    </div>
 
     <!-- Hours + Location -->
     <section id="location" class="py-10 sm:py-20 lg:py-32">
@@ -1201,7 +479,6 @@ onUnmounted(() => {
         <p class="text-mist text-[13px] sm:text-sm md:text-base mb-5 sm:mb-8 max-w-lg mx-auto">
           Your first step is the hardest. We'll make every step after that count.
         </p>
-        <a href="#register" class="btn-primary">Join OASIS Today</a>
       </div>
     </section>
 
@@ -1277,7 +554,7 @@ onUnmounted(() => {
             </button>
             <p class="text-gold text-[10px] sm:text-xs uppercase tracking-[4px] mb-3">Limited Offer</p>
             <h2 class="font-display text-2xl sm:text-3xl text-cream tracking-wide mb-2">Join OASIS Fitness Gym</h2>
-            <p class="text-mist text-sm sm:text-base mb-4">Get your permanent QR pass and start your fitness journey today. Walk-in daily or subscribe to a membership plan.</p>
+            <p class="text-mist text-sm sm:text-base mb-4">Get your permanent pass code and start your fitness journey today. Walk-in daily or subscribe to a membership plan.</p>
             <div class="flex flex-col gap-2 mb-4">
               <div class="flex justify-between text-xs sm:text-sm">
                 <span class="text-mist">Daily Walk-in</span>
@@ -1292,13 +569,6 @@ onUnmounted(() => {
                 <span class="text-gold font-display">₱1,499 /month</span>
               </div>
             </div>
-            <a
-              href="#register"
-              class="btn-primary inline-block w-full text-center text-sm sm:text-base py-3"
-              @click="dismissPromo"
-            >
-              Register Now
-            </a>
             <p class="text-mist text-[9px] sm:text-[10px] mt-3">Open 7 days a week — Calauan, Laguna</p>
           </div>
         </div>

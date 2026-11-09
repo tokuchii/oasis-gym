@@ -1,5 +1,4 @@
 import { useSupabaseAdmin } from '~/server/utils/supabase'
-import { sendCertificationEmail } from '~/server/utils/email'
 import { validateMembershipPayload, checkRateLimit } from '~/server/utils/walkin'
 
 export default defineEventHandler(async (event) => {
@@ -93,22 +92,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: 'Failed to submit payment. Please try again.' })
   }
 
-  let emailSent = false
-  let emailError = ''
-  try {
-    await sendCertificationEmail({ to: payload.email, fullName: payload.fullName, plan: payload.plan })
-    emailSent = true
-  } catch (err) {
-    console.error('[Membership] Failed to send certification email:', err)
-    emailError = err instanceof Error ? err.message : String(err)
-  }
-
   return {
-    message: emailSent
-      ? 'Payment submitted successfully. A certification email has been sent to your email address.'
-      : 'Payment submitted successfully. Email notification could not be sent — please check with staff.',
-    emailSent,
-    emailError: emailSent ? undefined : emailError,
+    message: 'Payment submitted successfully. You will receive an email once staff verifies your payment.',
     id: data.id,
   }
 })

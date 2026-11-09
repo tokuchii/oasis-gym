@@ -29,7 +29,8 @@ export default defineEventHandler(async (event) => {
     .eq('id', clientId)
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: error.message })
+    console.error('[Clients] Delete error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to remove client. Please try again.' })
   }
 
   return { message: `${client.client_name} moved to history.` }

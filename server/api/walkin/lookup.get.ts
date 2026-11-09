@@ -23,7 +23,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const supabase = useSupabaseAdmin()
-  let request = supabase.from('walkin_passes').select('*')
+  let request = supabase.from('walkin_passes').select('*').eq('removed', false)
 
   if (code) {
     if (!/^OASIS-[A-Z0-9]{4,12}$/i.test(code)) {
@@ -39,7 +39,8 @@ export default defineEventHandler(async (event) => {
   const { data, error } = await request.order('created_at', { ascending: false }).limit(10)
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: error.message })
+    console.error('[Walkin] Lookup error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Search failed. Please try again.' })
   }
 
   return {

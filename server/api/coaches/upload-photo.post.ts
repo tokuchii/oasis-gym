@@ -36,7 +36,8 @@ export default defineEventHandler(async (event) => {
     })
 
   if (uploadError) {
-    throw createError({ statusCode: 500, statusMessage: `Failed to upload photo: ${uploadError.message}` })
+    console.error('[Coaches] Photo upload error:', uploadError)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to upload photo. Please try again.' })
   }
 
   return { photoUrl: filePath }

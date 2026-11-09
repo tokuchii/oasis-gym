@@ -1,4 +1,4 @@
-const CACHE_NAME = 'oasis-shell-v3'
+const CACHE_NAME = 'oasis-shell-v4'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -38,21 +38,22 @@ self.addEventListener('fetch', (event) => {
 
   if (url.pathname.startsWith('/_nuxt/')) {
     event.respondWith(
-      caches.match(event.request).then((cached) => {
-        if (cached) return cached
-        return fetch(event.request).then((res) => {
-          const clone = res.clone()
-          caches.open(CACHE_NAME).then((c) => c.put(event.request, clone))
+      fetch(event.request)
+        .then((res) => {
+          if (res.ok) {
+            const clone = res.clone()
+            caches.open(CACHE_NAME).then((c) => c.put(event.request, clone))
+          }
           return res
         })
-      })
+        .catch(() => caches.match(event.request))
     )
     return
   }
 
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: 'no-cache' })
         .catch(() => caches.match('/staff').then((cached) => cached || caches.match('/')))
     )
     return

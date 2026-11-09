@@ -35,11 +35,11 @@ oasisfitnessgym/
 │   └── utils/                 # Supabase, auth, pass codes
 ├── pages/
 │   ├── index.vue              # Full SPA — all sections
-│   └── staff/index.vue        # Staff QR check-in dashboard
+│   └── staff/index.vue        # Staff dashboard (reports, check-in)
 ├── supabase/
 │   └── schema.sql             # Database setup script
 ├── composables/
-│   └── useWalkinPass.ts       # QR code generation
+│   └── useToast.ts             # iOS-style toast notifications
 ├── public/
 │   ├── favicon.svg
 │   ├── robots.txt
@@ -102,7 +102,7 @@ Update the `socials` array with real profile URLs.
 
 ### 5. Walk-in / Day Pass Check-in (Supabase)
 
-Walk-in registration uses a real backend with QR codes and a staff dashboard.
+Walk-in registration uses a real backend with pass codes and a staff dashboard.
 
 **Setup:**
 1. Create a free project at [supabase.com](https://supabase.com)
@@ -115,8 +115,8 @@ Walk-in registration uses a real backend with QR codes and a staff dashboard.
 4. Add the same env vars in Vercel Dashboard → Settings → Environment Variables
 
 **How it works:**
-- Client registers → receives a unique pass code (e.g. `OASIS-7K3M2P`) and QR code
-- Staff opens `/staff`, logs in, scans QR or searches by code/phone/name
+- Client registers → receives a unique pass code (e.g. `OASIS-7K3M2P`)
+- Staff opens `/staff`, logs in, looks up by code/phone/name
 - Staff taps **Check In** → pass is marked used (cannot be reused same day)
 
 ### 6. Membership Payment Form
@@ -172,7 +172,7 @@ SESSION_SECRET=your_random_secret
 - [x] Gallery grid (6 zones)
 - [x] Membership Plans (4 tiers)
 - [x] Manual Payment Form (with file upload + validation)
-- [x] Walk-in / Day Pass Form (with waiver + QR check-in)
+- [x] Walk-in / Day Pass Form (with waiver + pass code check-in)
 - [x] Operating Hours
 - [x] Google Maps embed (dark-tinted)
 - [x] CTA banner

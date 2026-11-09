@@ -32,6 +32,11 @@ export default defineEventHandler(async (event) => {
     dateFrom = getVisitDateManila(monday)
     dateTo = getVisitDateManila(sunday)
   } else if (period === 'month') {
+    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+    const lastOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+    dateFrom = getVisitDateManila(firstOfMonth)
+    dateTo = getVisitDateManila(lastOfMonth)
+  } else if (period === 'year') {
     const firstOfYear = new Date(now.getFullYear(), 0, 1)
     const lastOfYear = new Date(now.getFullYear(), 11, 31)
     dateFrom = getVisitDateManila(firstOfYear)
@@ -54,7 +59,8 @@ export default defineEventHandler(async (event) => {
   ])
 
   if (passError) {
-    throw createError({ statusCode: 500, statusMessage: passError.message })
+    console.error('[Reports] Pass query error:', passError)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to load reports. Please try again.' })
   }
   if (payError) {
     console.error('[Reports] Membership payment error:', payError)
@@ -151,7 +157,7 @@ export default defineEventHandler(async (event) => {
         revenue: wRev + mRev,
       })
     }
-  } else if (period === 'month') {
+  } else if (period === 'month' || period === 'year') {
     const year = now.getFullYear()
 
     for (let m = 0; m < 12; m++) {

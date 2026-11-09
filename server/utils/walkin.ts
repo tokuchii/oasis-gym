@@ -18,6 +18,8 @@ export function resolvePassStatus(pass: WalkinPass): WalkinPassStatus {
 
 const MAX_LENGTHS = { fullName: 100, email: 254, phone: 15, emergencyContact: 100, specialty: 200, bio: 500 }
 
+export const MEMBER_STATUS_IDS = ['walkin', 'weekly', 'monthly', 'yearly']
+
 const SQL_INJECTION_RE = /(\b(OR|AND)\b\s+\d+\s*=\s*\d+|;\s*DROP|;\s*DELETE|;\s*INSERT|;\s*UPDATE|--\s*$|'\s*OR\s+')/i
 const XSS_RE = /<\s*script|on\w+\s*=|javascript\s*:|<\s*iframe|<\s*object|<\s*embed|<\s*img[^>]+onerror/i
 const DISPOSIVE_DOMAINS = new Set([
@@ -88,6 +90,7 @@ export function normalizePhone(phone: string): string {
 export function validatePhone(phone: string): string | null {
   const cleaned = phone.replace(/[\s\-()]/g, '')
   if (!cleaned) return 'Phone number is required.'
+  if (cleaned === '+63' || cleaned === '63') return 'Phone number is required.'
   if (cleaned.length > 13) return 'Phone number is too long (max 13 characters including +).'
   if (!/^\+?\d+$/.test(cleaned)) return 'Phone number must contain only digits (and optional leading +).'
 
@@ -180,6 +183,11 @@ export function validateWalkinPayload(body: unknown) {
   const emailRaw = String(data.email ?? '')
   const phoneRaw = String(data.phone ?? '')
   const emergencyContact = sanitizeText(String(data.emergencyContact ?? ''))
+  const memberStatus = String(data.memberStatus ?? 'walkin').toLowerCase()
+
+  if (!MEMBER_STATUS_IDS.includes(memberStatus)) {
+    throw createError({ statusCode: 400, statusMessage: 'Member status must be walk-in, weekly, monthly, or yearly.' })
+  }
 
   const spamCheck = isSpamInput(fullName)
   if (spamCheck) throw createError({ statusCode: 400, statusMessage: spamCheck })
@@ -194,23 +202,22 @@ export function validateWalkinPayload(body: unknown) {
     throw createError({ statusCode: 400, statusMessage: 'Full name is too long.' })
   }
 
-  const emailErr = validateEmail(emailRaw)
-  if (emailErr) throw createError({ statusCode: 400, statusMessage: emailErr })
+  if (emailRaw.trim()) {
+    const emailErr = validateEmail(emailRaw)
+    if (emailErr) throw createError({ statusCode: 400, statusMessage: emailErr })
+  }
 
   const phoneErr = validatePhone(phoneRaw)
   if (phoneErr) throw createError({ statusCode: 400, statusMessage: phoneErr })
 
-  if (!emergencyContact) {
-    throw createError({ statusCode: 400, statusMessage: 'Emergency contact is required.' })
-  }
-  if (emergencyContact.length < 2) {
+  if (emergencyContact && emergencyContact.length < 2) {
     throw createError({ statusCode: 400, statusMessage: 'Emergency contact must be at least 2 characters.' })
   }
   if (emergencyContact.length > MAX_LENGTHS.emergencyContact) {
     throw createError({ statusCode: 400, statusMessage: 'Emergency contact is too long.' })
   }
 
-  return { fullName, email: emailRaw.trim().toLowerCase(), phone: normalizePhone(phoneRaw), emergencyContact }
+  return { fullName, email: emailRaw.trim().toLowerCase(), phone: normalizePhone(phoneRaw), emergencyContact, memberStatus }
 }
 
 export function validateCoachPayload(body: unknown) {
@@ -293,5 +300,6 @@ export function serializePass(pass: WalkinPass) {
     checkedInAt: pass.checked_in_at,
     checkedInBy: pass.checked_in_by,
     points: pass.points ?? 0,
+    memberStatus: pass.member_status ?? 'walkin',
   }
 }

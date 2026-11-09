@@ -68,19 +68,12 @@ export default defineNuxtConfig({
           'X-XSS-Protection': '0',
         },
       },
-      '/api/**': {
-        headers: {
-          'Access-Control-Allow-Origin': 'https://localhost',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-          'Access-Control-Allow-Credentials': 'true',
-          'Access-Control-Max-Age': '86400',
-        },
-      },
     },
   },
 
   runtimeConfig: {
+    corsOrigins: process.env.CORS_ALLOWED_ORIGINS ?? '',
+    geminiApiKey: process.env.GEMINI_API_KEY,
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
     adminPassword: process.env.ADMIN_PASSWORD,

@@ -11,6 +11,10 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Receipt URL is required.' })
   }
 
+  if (!receiptUrl.startsWith('receipts/')) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid receipt path.' })
+  }
+
   const supabase = useSupabaseAdmin()
 
   const { data, error } = await supabase
@@ -19,7 +23,8 @@ export default defineEventHandler(async (event) => {
     .createSignedUrl(receiptUrl, 3600)
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: `Failed to generate signed URL: ${error.message}` })
+    console.error('[Membership] Signed URL error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to load receipt. Please try again.' })
   }
 
   return { signedUrl: data.signedUrl }

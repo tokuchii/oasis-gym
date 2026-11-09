@@ -10,7 +10,8 @@ export default defineEventHandler(async () => {
     .order('display_order', { ascending: true })
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: error.message })
+    console.error('[Coaches] List error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to load coaches. Please try again.' })
   }
 
   const coaches = await Promise.all(

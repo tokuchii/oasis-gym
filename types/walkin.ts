@@ -1,5 +1,7 @@
 export type WalkinPassStatus = 'registered' | 'checked_in'
 
+export type MemberStatus = 'walkin' | 'weekly' | 'monthly' | 'yearly'
+
 export interface WalkinPass {
   id: string
   pass_code: string
@@ -14,6 +16,8 @@ export interface WalkinPass {
   checked_in_at: string | null
   checked_in_by: string | null
   points: number
+  member_status: MemberStatus
+  removed: boolean
 }
 
 export interface WalkinRegisterPayload {
@@ -21,6 +25,7 @@ export interface WalkinRegisterPayload {
   email: string
   phone: string
   emergencyContact: string
+  memberStatus?: MemberStatus
 }
 
 export interface WalkinPassPublic {
@@ -28,15 +33,16 @@ export interface WalkinPassPublic {
   fullName: string
   visitDate: string
   status: WalkinPassStatus
-  qrPayload: string
 }
+
+export type MembershipPlanId = 'weekly' | 'monthly' | 'yearly'
 
 export interface MembershipPayment {
   id: string
   full_name: string
   email: string
   phone: string
-  plan: 'weekly' | 'monthly'
+  plan: MembershipPlanId
   coach: string | null
   payment_method: string
   reference_no: string | null
@@ -74,7 +80,7 @@ export interface ClientSession {
   client_email: string
   client_phone: string
   coach_name: string | null
-  plan: 'weekly' | 'monthly'
+  plan: MembershipPlanId
   total_sessions: number
   sessions_used: number
   start_date: string
@@ -88,7 +94,14 @@ export interface ClientSession {
 export const SESSION_LIMITS: Record<string, number> = {
   weekly: 4,
   monthly: 13,
+  yearly: 156,
 }
+
+export const MEMBERSHIP_PLAN_TERMS: { id: MembershipPlanId; label: string; amount: number; days: number }[] = [
+  { id: 'weekly', label: 'Weekly', amount: 599, days: 7 },
+  { id: 'monthly', label: 'Monthly', amount: 1499, days: 30 },
+  { id: 'yearly', label: 'Yearly', amount: 0, days: 365 },
+]
 
 export const MEMBERSHIP_PLANS = [
   {
@@ -115,10 +128,21 @@ export const MEMBERSHIP_PLANS_DISPLAY = [
     name: 'Daily (Walk-in)',
     price: '65',
     period: '/visit',
-    features: ['Full-day access', 'Locker use', 'No commitment', 'Permanent QR code'],
+    features: ['Full-day access', 'Locker use', 'No commitment', 'Permanent pass code'],
     featured: false,
   },
   ...MEMBERSHIP_PLANS,
 ]
 
 export const WALKIN_DEFAULT_FEE = 65
+
+export const MEMBER_STATUSES: { id: MemberStatus; label: string; short: string }[] = [
+  { id: 'walkin', label: 'Walk-in (Daily)', short: 'Walk-in' },
+  { id: 'weekly', label: 'Weekly Plan', short: 'Weekly' },
+  { id: 'monthly', label: 'Monthly Plan', short: 'Monthly' },
+  { id: 'yearly', label: 'Yearly Plan', short: 'Yearly' },
+]
+
+export function memberStatusLabel(status: string): string {
+  return MEMBER_STATUSES.find((s) => s.id === status)?.short ?? 'Walk-in'
+}

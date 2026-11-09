@@ -18,7 +18,8 @@ export default defineEventHandler(async (event) => {
     .eq('id', coachId)
 
   if (error) {
-    throw createError({ statusCode: 500, statusMessage: error.message })
+    console.error('[Coaches] Delete error:', error)
+    throw createError({ statusCode: 500, statusMessage: 'Failed to remove coach. Please try again.' })
   }
 
   return { message: 'Coach removed.' }

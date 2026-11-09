@@ -14,7 +14,9 @@ create table if not exists walkin_passes (
   created_at        timestamptz not null default now(),
   checked_in_at     timestamptz,
   checked_in_by     text,
-  points            numeric not null default 0
+  points            numeric not null default 0,
+  member_status     text not null default 'walkin' check (member_status in ('walkin', 'weekly', 'monthly', 'yearly')),
+  removed           boolean not null default false
 );
 
 create index if not exists walkin_passes_pass_code_idx on walkin_passes (pass_code);
@@ -23,13 +25,13 @@ create index if not exists walkin_passes_phone_visit_date_idx on walkin_passes (
 
 alter table walkin_passes enable row level security;
 
--- Membership payments (weekly/monthly)
+-- Membership payments (weekly/monthly/yearly)
 create table if not exists membership_payments (
   id                uuid primary key default gen_random_uuid(),
   full_name         text not null,
   email             text not null,
   phone             text not null,
-  plan              text not null check (plan in ('weekly', 'monthly')),
+  plan              text not null check (plan in ('weekly', 'monthly', 'yearly')),
   coach             text,
   payment_method    text not null,
   reference_no      text,
@@ -57,7 +59,7 @@ create table if not exists client_sessions (
   client_email      text not null,
   client_phone      text not null,
   coach_name        text,
-  plan              text not null check (plan in ('weekly', 'monthly')),
+  plan              text not null check (plan in ('weekly', 'monthly', 'yearly')),
   total_sessions    int not null,
   sessions_used     int not null default 0,
   start_date        date not null default (timezone('Asia/Manila', now()))::date,
@@ -89,3 +91,29 @@ create table if not exists coaches (
 create index if not exists coaches_active_idx on coaches (active, display_order);
 
 alter table coaches enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- Migrations (safe to re-run on an existing database)
+-- ---------------------------------------------------------------------------
+
+-- Walk-in member status (walk-in / weekly / monthly / yearly) + soft removal.
+alter table walkin_passes add column if not exists member_status text not null default 'walkin';
+alter table walkin_passes add column if not exists removed boolean not null default false;
+
+alter table walkin_passes drop constraint if exists walkin_passes_member_status_check;
+alter table walkin_passes
+  add constraint walkin_passes_member_status_check
+  check (member_status in ('walkin', 'weekly', 'monthly', 'yearly'));
+
+create index if not exists walkin_passes_removed_member_status_idx on walkin_passes (removed, member_status);
+
+-- Yearly plan support on membership payments and client sessions.
+alter table membership_payments drop constraint if exists membership_payments_plan_check;
+alter table membership_payments
+  add constraint membership_payments_plan_check
+  check (plan in ('weekly', 'monthly', 'yearly'));
+
+alter table client_sessions drop constraint if exists client_sessions_plan_check;
+alter table client_sessions
+  add constraint client_sessions_plan_check
+  check (plan in ('weekly', 'monthly', 'yearly'));
