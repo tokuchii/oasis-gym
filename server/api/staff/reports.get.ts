@@ -14,16 +14,27 @@ export default defineEventHandler(async (event) => {
   requireStaff(event)
 
   const query = getQuery(event)
-  const period = String(query.period ?? 'day')
+  let period = String(query.period ?? 'day')
+  const requestedDate = String(query.date ?? '').trim()
+  const hasRequestedDate = /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
+  const requestedFrom = String(query.from ?? '').trim()
+  const requestedTo = String(query.to ?? '').trim()
+  const hasRequestedRange = /^\d{4}-\d{2}-\d{2}$/.test(requestedFrom)
+    && /^\d{4}-\d{2}-\d{2}$/.test(requestedTo)
+    && requestedFrom <= requestedTo
 
   const supabase = useSupabaseAdmin()
   const now = new Date()
   const today = getVisitDateManila()
 
-  let dateFrom = today
-  let dateTo = today
+  let dateFrom = hasRequestedDate ? requestedDate : hasRequestedRange ? requestedFrom : today
+  let dateTo = hasRequestedDate ? requestedDate : hasRequestedRange ? requestedTo : today
 
-  if (period === 'week') {
+  if (hasRequestedDate) {
+    period = 'day'
+  } else if (hasRequestedRange) {
+    period = 'range'
+  } else if (period === 'week') {
     const dayOfWeek = now.getDay()
     const monday = new Date(now)
     monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1))
@@ -43,7 +54,12 @@ export default defineEventHandler(async (event) => {
     dateTo = getVisitDateManila(lastOfYear)
   }
 
-  const [{ data: passes, error: passError }, { data: payments, error: payError }] = await Promise.all([
+  const [
+    { data: passes, error: passError },
+    { data: payments, error: payError },
+    { data: allPassDates },
+    { data: allPaymentDates },
+  ] = await Promise.all([
     supabase
       .from('walkin_passes')
       .select('id, pass_code, full_name, phone, email, visit_date, status, payment_amount, created_at, checked_in_at')
@@ -56,6 +72,8 @@ export default defineEventHandler(async (event) => {
       .gte('created_at', `${dateFrom}T00:00:00`)
       .lte('created_at', `${dateTo}T23:59:59`)
       .order('created_at', { ascending: false }),
+    supabase.from('walkin_passes').select('visit_date').limit(5000),
+    supabase.from('membership_payments').select('created_at').limit(5000),
   ])
 
   if (passError) {
@@ -124,15 +142,16 @@ export default defineEventHandler(async (event) => {
   let chartData: { date: string; label: string; visits: number; checkedOut: number; revenue: number; walkinRevenue: number; membershipRevenue: number }[] = []
 
   if (period === 'day') {
-    const d = dailyBreakdown[today]
+    const chartDate = dateFrom
+    const d = dailyBreakdown[chartDate]
     chartData = [{
-      date: today,
-      label: 'Today',
+      date: chartDate,
+      label: chartDate === today ? 'Today' : chartDate,
       visits: d?.visits ?? 0,
       checkedOut: d?.checkedOut ?? 0,
       revenue: d?.revenue ?? 0,
       walkinRevenue: d?.revenue ?? 0,
-      membershipRevenue: dailyMembershipRevenue[today] ?? 0,
+      membershipRevenue: dailyMembershipRevenue[chartDate] ?? 0,
     }]
     chartData[0].revenue = chartData[0].walkinRevenue + chartData[0].membershipRevenue
   } else if (period === 'week') {
@@ -196,8 +215,14 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  const availableDates = Array.from(new Set([
+    ...(allPassDates ?? []).map((r) => String(r.visit_date ?? '')),
+    ...(allPaymentDates ?? []).map((r) => String(r.created_at ?? '').slice(0, 10)),
+  ])).filter(Boolean).sort((a, b) => b.localeCompare(a))
+
   return {
     visits: serialized,
+    availableDates,
     summary: {
       totalVisits,
       checkedOut,

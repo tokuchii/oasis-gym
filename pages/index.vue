@@ -387,8 +387,14 @@ onUnmounted(() => {
             </span>
             <h3 class="font-display text-lg sm:text-2xl text-cream tracking-wide mb-1 sm:mb-2">{{ plan.name }}</h3>
             <div class="mb-3 sm:mb-6">
-              <span class="font-display text-[1.75rem] sm:text-4xl text-gold">₱{{ plan.price }}</span>
-              <span class="text-mist text-[11px] sm:text-sm">{{ plan.period }}</span>
+              <div class="flex items-baseline gap-2">
+                <span class="font-display text-[1.75rem] sm:text-4xl text-gold">₱{{ plan.price }}</span>
+                <span class="text-mist text-[11px] sm:text-sm">{{ plan.period }}</span>
+                <span class="text-[9px] sm:text-[10px] uppercase tracking-wider text-mist">Member</span>
+              </div>
+              <p class="text-mist text-[10px] sm:text-xs mt-0.5">
+                Non-member: <span class="text-cream">₱{{ plan.nonMemberPrice }}</span> {{ plan.period }}
+              </p>
             </div>
             <ul class="space-y-1.5 sm:space-y-3 mb-4 sm:mb-8 flex-1">
               <li v-for="feat in plan.features" :key="feat" class="flex items-start gap-1.5 sm:gap-2 text-[11px] sm:text-sm text-mist">
@@ -405,6 +411,16 @@ onUnmounted(() => {
               Choose Plan
             </a>
           </div>
+        </div>
+
+        <div class="mt-5 sm:mt-8 max-w-4xl mx-auto text-center space-y-1.5">
+          <p class="text-mist text-[11px] sm:text-sm">
+            Membership Fee: <span class="text-cream">₱300.00</span>, valid for 1 year
+          </p>
+          <p class="text-mist text-[11px] sm:text-sm">
+            Instructor's Fee: <span class="text-cream">₱150.00/session</span>
+          </p>
+          <p class="text-mist text-[10px] sm:text-xs italic">Price may change without prior notice</p>
         </div>
       </div>
     </section>
@@ -557,16 +573,28 @@ onUnmounted(() => {
             <p class="text-mist text-sm sm:text-base mb-4">Get your permanent pass code and start your fitness journey today. Walk-in daily or subscribe to a membership plan.</p>
             <div class="flex flex-col gap-2 mb-4">
               <div class="flex justify-between text-xs sm:text-sm">
-                <span class="text-mist">Daily Walk-in</span>
+                <span class="text-mist">Daily Walk-in (Member)</span>
                 <span class="text-gold font-display">₱65 /visit</span>
               </div>
               <div class="flex justify-between text-xs sm:text-sm">
-                <span class="text-mist">Weekly Plan</span>
-                <span class="text-gold font-display">₱599 /week</span>
+                <span class="text-mist">Daily Walk-in (Non-member)</span>
+                <span class="text-gold font-display">₱85 /visit</span>
               </div>
               <div class="flex justify-between text-xs sm:text-sm">
-                <span class="text-mist">Monthly Plan</span>
-                <span class="text-gold font-display">₱1,499 /month</span>
+                <span class="text-mist">Weekly (Member / Non-member)</span>
+                <span class="text-gold font-display">₱270 / ₱350</span>
+              </div>
+              <div class="flex justify-between text-xs sm:text-sm">
+                <span class="text-mist">Monthly (Member / Non-member)</span>
+                <span class="text-gold font-display">₱850 / ₱1,000</span>
+              </div>
+              <div class="flex justify-between text-xs sm:text-sm border-t border-iron pt-2">
+                <span class="text-mist">Membership Fee</span>
+                <span class="text-cream font-display">₱300 / year</span>
+              </div>
+              <div class="flex justify-between text-xs sm:text-sm">
+                <span class="text-mist">Instructor's Fee</span>
+                <span class="text-cream font-display">₱150 / session</span>
               </div>
             </div>
             <p class="text-mist text-[9px] sm:text-[10px] mt-3">Open 7 days a week — Calauan, Laguna</p>

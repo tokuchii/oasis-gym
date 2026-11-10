@@ -18,7 +18,8 @@ export function resolvePassStatus(pass: WalkinPass): WalkinPassStatus {
 
 const MAX_LENGTHS = { fullName: 100, email: 254, phone: 15, emergencyContact: 100, specialty: 200, bio: 500 }
 
-export const MEMBER_STATUS_IDS = ['walkin', 'weekly', 'monthly', 'yearly']
+export const MEMBER_STATUS_IDS = ['walkin', 'weekly', 'monthly']
+export const CUSTOMER_TYPE_IDS = ['member', 'non_member']
 
 const SQL_INJECTION_RE = /(\b(OR|AND)\b\s+\d+\s*=\s*\d+|;\s*DROP|;\s*DELETE|;\s*INSERT|;\s*UPDATE|--\s*$|'\s*OR\s+')/i
 const XSS_RE = /<\s*script|on\w+\s*=|javascript\s*:|<\s*iframe|<\s*object|<\s*embed|<\s*img[^>]+onerror/i
@@ -184,9 +185,14 @@ export function validateWalkinPayload(body: unknown) {
   const phoneRaw = String(data.phone ?? '')
   const emergencyContact = sanitizeText(String(data.emergencyContact ?? ''))
   const memberStatus = String(data.memberStatus ?? 'walkin').toLowerCase()
+  const customerType = String(data.customerType ?? 'non_member').toLowerCase()
 
   if (!MEMBER_STATUS_IDS.includes(memberStatus)) {
-    throw createError({ statusCode: 400, statusMessage: 'Member status must be walk-in, weekly, monthly, or yearly.' })
+    throw createError({ statusCode: 400, statusMessage: 'Member status must be daily, weekly, or monthly.' })
+  }
+
+  if (!CUSTOMER_TYPE_IDS.includes(customerType)) {
+    throw createError({ statusCode: 400, statusMessage: 'Customer type must be member or non-member.' })
   }
 
   const spamCheck = isSpamInput(fullName)
@@ -217,7 +223,7 @@ export function validateWalkinPayload(body: unknown) {
     throw createError({ statusCode: 400, statusMessage: 'Emergency contact is too long.' })
   }
 
-  return { fullName, email: emailRaw.trim().toLowerCase(), phone: normalizePhone(phoneRaw), emergencyContact, memberStatus }
+  return { fullName, email: emailRaw.trim().toLowerCase(), phone: normalizePhone(phoneRaw), emergencyContact, memberStatus, customerType }
 }
 
 export function validateCoachPayload(body: unknown) {
@@ -258,6 +264,7 @@ export function validateMembershipPayload(fields: Record<string, string>) {
   const emailRaw = fields.email ?? ''
   const phoneRaw = fields.phone ?? ''
   const plan = String(fields.plan ?? '').toLowerCase()
+  const customerType = String(fields.customerType ?? 'member').toLowerCase()
   const paymentMethod = String(fields.paymentMethod ?? '').trim()
   const referenceNo = sanitizeText(fields.referenceNo ?? '')
   const amount = Number(fields.amount)
@@ -273,7 +280,8 @@ export function validateMembershipPayload(fields: Record<string, string>) {
   const phoneErr = validatePhone(phoneRaw)
   if (phoneErr) errors.push(phoneErr)
 
-  if (plan !== 'weekly' && plan !== 'monthly') errors.push('Plan must be weekly or monthly.')
+  if (!['daily', 'weekly', 'monthly'].includes(plan)) errors.push('Plan must be daily, weekly, or monthly.')
+  if (!['member', 'non_member'].includes(customerType)) errors.push('Customer type must be member or non-member.')
   if (!['gcash', 'bank'].includes(paymentMethod)) errors.push('Payment method must be GCash or Bank Transfer.')
   if (isNaN(amount) || amount <= 0 || amount > 100000) errors.push('Amount must be between ₱1 and ₱100,000.')
   if (referenceNo && referenceNo.length > 40) errors.push('Reference number is too long.')
@@ -282,7 +290,7 @@ export function validateMembershipPayload(fields: Record<string, string>) {
     throw createError({ statusCode: 400, statusMessage: errors.join(' ') })
   }
 
-  return { fullName, email: emailRaw.trim().toLowerCase(), phone: normalizePhone(phoneRaw), plan, paymentMethod, referenceNo, amount }
+  return { fullName, email: emailRaw.trim().toLowerCase(), phone: normalizePhone(phoneRaw), plan, customerType, paymentMethod, referenceNo, amount }
 }
 
 export function serializePass(pass: WalkinPass) {
@@ -301,5 +309,6 @@ export function serializePass(pass: WalkinPass) {
     checkedInBy: pass.checked_in_by,
     points: pass.points ?? 0,
     memberStatus: pass.member_status ?? 'walkin',
+    customerType: pass.customer_type ?? 'non_member',
   }
 }

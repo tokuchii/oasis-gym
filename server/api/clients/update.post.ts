@@ -1,7 +1,6 @@
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
-
-const PLAN_PRICES: Record<string, number> = { weekly: 599, monthly: 1499 }
+import { getPlanRate, type CustomerType, type MembershipPlanId } from '~/types/walkin'
 
 export default defineEventHandler(async (event) => {
   requireStaff(event)
@@ -73,7 +72,7 @@ export default defineEventHandler(async (event) => {
   }
 
   if (action === 'update_payment') {
-    const totalAmount = PLAN_PRICES[client.plan] ?? 599
+    const totalAmount = getPlanRate(client.plan as MembershipPlanId, (client.customer_type ?? 'member') as CustomerType)
     const updatePayload: Record<string, unknown> = {}
     if (paidAmount != null && !isNaN(paidAmount) && paidAmount > 0) {
       updatePayload.paid_amount = paidAmount

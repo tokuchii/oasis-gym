@@ -1,8 +1,6 @@
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
-
-const SESSION_LIMITS: Record<string, number> = { weekly: 4, monthly: 13 }
-const PLAN_PRICES: Record<string, number> = { weekly: 599, monthly: 1499 }
+import { getPlanDays, getPlanRate, getPlanSessions, type CustomerType, type MembershipPlanId } from '~/types/walkin'
 
 export default defineEventHandler(async (event) => {
   requireStaff(event)
@@ -13,7 +11,8 @@ export default defineEventHandler(async (event) => {
   const clientEmail = String(body?.clientEmail ?? '').trim()
   const clientPhone = String(body?.clientPhone ?? '').trim()
   const coachName = String(body?.coachName ?? '').trim() || null
-  const plan = String(body?.plan ?? '')
+  const plan = String(body?.plan ?? '') as MembershipPlanId
+  const customerType = String(body?.customerType ?? 'member') as CustomerType
   const paidAmount = body?.paidAmount != null ? Number(body.paidAmount) : null
   const note = String(body?.note ?? '').trim() || null
 
@@ -26,17 +25,20 @@ export default defineEventHandler(async (event) => {
   if (!clientPhone) {
     throw createError({ statusCode: 400, statusMessage: 'Client phone is required.' })
   }
-  if (plan !== 'weekly' && plan !== 'monthly') {
-    throw createError({ statusCode: 400, statusMessage: 'Plan must be weekly or monthly.' })
+  if (!['daily', 'weekly', 'monthly'].includes(plan)) {
+    throw createError({ statusCode: 400, statusMessage: 'Plan must be daily, weekly, or monthly.' })
+  }
+  if (!['member', 'non_member'].includes(customerType)) {
+    throw createError({ statusCode: 400, statusMessage: 'Customer type must be member or non-member.' })
   }
 
-  const totalSessions = SESSION_LIMITS[plan] ?? 4
-  const totalAmount = PLAN_PRICES[plan] ?? 599
+  const totalSessions = getPlanSessions(plan)
+  const totalAmount = getPlanRate(plan, customerType)
 
   const now = new Date()
   const startDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(now)
   const endDate = new Date(now)
-  endDate.setFullYear(endDate.getFullYear() + 1)
+  endDate.setDate(endDate.getDate() + getPlanDays(plan))
   const endDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(endDate)
 
   const supabase = useSupabaseAdmin()
@@ -49,6 +51,7 @@ export default defineEventHandler(async (event) => {
       client_phone: clientPhone,
       coach_name: coachName,
       plan,
+      customer_type: customerType,
       total_sessions: totalSessions,
       sessions_used: 0,
       start_date: startDate,

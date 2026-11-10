@@ -1,8 +1,13 @@
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { sendMembershipApprovedEmail, sendMembershipRejectedEmail, sendCertificationEmail } from '~/server/utils/email'
+import { getPlanDays, getPlanSessions, type MembershipPlanId } from '~/types/walkin'
 
-const SESSION_LIMITS: Record<string, number> = { weekly: 4, monthly: 13, yearly: 156 }
+function addDays(dateStr: string, days: number): string {
+  const date = new Date(`${dateStr}T00:00:00`)
+  date.setDate(date.getDate() + days)
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(date)
+}
 
 export default defineEventHandler(async (event) => {
   requireStaff(event)
@@ -35,8 +40,12 @@ export default defineEventHandler(async (event) => {
 
   const updatePayload: Record<string, unknown> = { status }
   if (note) updatePayload.note = note
-  if (status === 'partial' && paidAmount != null && !isNaN(paidAmount) && paidAmount > 0) {
+  if ((status === 'partial' || status === 'approved') && paidAmount != null && !isNaN(paidAmount) && paidAmount > 0) {
     updatePayload.paid_amount = paidAmount
+  }
+  if (status === 'approved' && existing.status === 'pending') {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date())
+    updatePayload.expiry_date = addDays(today, getPlanDays(existing.plan as MembershipPlanId))
   }
 
   const { data, error } = await supabase
@@ -51,33 +60,42 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: 'Failed to update payment. Please try again.' })
   }
 
-  if (status === 'approved') {
-    const totalSessions = SESSION_LIMITS[existing.plan] ?? 4
-    const now = new Date()
-    const startDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(now)
-    const endDate = new Date(now)
-    endDate.setFullYear(endDate.getFullYear() + 1)
-    const endDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(endDate)
+  if (status === 'approved' || status === 'partial') {
+    const plan = existing.plan as MembershipPlanId
+    const totalSessions = getPlanSessions(plan)
 
-    const { error: sessionError } = await supabase
+    const { data: linkedSession } = await supabase
       .from('client_sessions')
-      .insert({
-        client_name: existing.full_name,
-        client_email: existing.email,
-        client_phone: existing.phone,
-        coach_name: existing.coach || null,
-        plan: existing.plan,
-        total_sessions: totalSessions,
-        sessions_used: 0,
-        start_date: startDate,
-        end_date: endDateStr,
-        status: 'active',
-        note: note ?? `Auto-created from membership (${existing.plan} plan)`,
-        paid_amount: existing.amount,
-      })
+      .select('id')
+      .eq('payment_id', existing.id)
+      .maybeSingle()
 
-    if (sessionError) {
-      console.error('[Membership] Failed to create client session:', sessionError.message)
+    if (!linkedSession) {
+      const startDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date())
+      const endDateStr = data.expiry_date ?? existing.expiry_date ?? addDays(startDate, getPlanDays(plan))
+
+      const { error: sessionError } = await supabase
+        .from('client_sessions')
+        .insert({
+          client_name: existing.full_name,
+          client_email: existing.email,
+          client_phone: existing.phone,
+          coach_name: existing.coach || null,
+          plan,
+          customer_type: existing.customer_type ?? 'member',
+          payment_id: existing.id,
+          total_sessions: totalSessions,
+          sessions_used: 0,
+          start_date: startDate,
+          end_date: endDateStr,
+          status: 'active',
+          note: note ?? `Auto-created from membership (${plan} plan)`,
+          paid_amount: existing.paid_amount ?? existing.amount,
+        })
+
+      if (sessionError) {
+        console.error('[Membership] Failed to create client session:', sessionError.message)
+      }
     }
   }
 
@@ -95,6 +113,7 @@ export default defineEventHandler(async (event) => {
         to: data.email,
         fullName: data.full_name,
         plan: data.plan,
+        expiryDate: data.expiry_date ?? undefined,
       })
     } else if (status === 'rejected') {
       await sendMembershipRejectedEmail({
@@ -109,7 +128,7 @@ export default defineEventHandler(async (event) => {
   }
 
   return {
-    message: `Payment ${status === 'approved' ? 'approved' : status === 'partial' ? 'marked as partial' : 'rejected'} successfully.${status === 'approved' ? ' Client session created.' : ''}${emailSent ? ' Email sent.' : ''}`,
+    message: `Payment ${status === 'approved' ? 'approved' : status === 'partial' ? 'marked as partial' : 'rejected'} successfully.${status === 'approved' || status === 'partial' ? ' Client session active.' : ''}${emailSent ? ' Email sent.' : ''}`,
     emailSent,
     payment: {
       id: data.id,

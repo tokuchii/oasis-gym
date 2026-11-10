@@ -1,5 +1,16 @@
 <script setup lang="ts">
-import { MEMBER_STATUSES, MEMBERSHIP_PLAN_TERMS, WALKIN_DEFAULT_FEE } from '~/types/walkin'
+import {
+  MEMBER_STATUSES,
+  MEMBERSHIP_PLAN_TERMS,
+  MEMBERSHIP_FEE,
+  INSTRUCTOR_FEE,
+  PLAN_RATES,
+  clientDefaultRate,
+  clientTypeLabel,
+  type CustomerType,
+  type MemberStatus,
+  type MembershipPlanId,
+} from '~/types/walkin'
 import { useToast } from '~/composables/useToast'
 import { useCachedFetch } from '~/composables/useCachedFetch'
 import { useOnlineStatus } from '~/composables/useOnlineStatus'
@@ -32,6 +43,7 @@ interface PassResult {
   checkedInBy: string | null
   points: number
   memberStatus: string
+  customerType: CustomerType
 }
 
 interface CoachItem {
@@ -92,6 +104,7 @@ const walkinForm = reactive({
   email: '',
   emergencyContact: '',
   memberStatus: 'walkin',
+  customerType: 'non_member' as CustomerType,
 })
 const walkinPhoneLocal = ref('')
 const walkinSubmitting = ref(false)
@@ -99,11 +112,16 @@ const walkinMessage = ref('')
 const walkinPassCode = ref('')
 const walkinFormHoneypot = ref('')
 
+const walkinDefaultRate = computed(() =>
+  clientDefaultRate(walkinForm.customerType, walkinForm.memberStatus as MemberStatus),
+)
+
 const selectedPass = ref<PassResult | null>(null)
 const checkinLoading = ref(false)
 const checkinMessage = ref('')
 const checkinError = ref('')
-const checkinPaymentAmount = ref(WALKIN_DEFAULT_FEE)
+const checkinCustomerType = ref<CustomerType>('non_member')
+const checkinPaymentAmount = ref(PLAN_RATES.non_member.daily)
 
 const membersList = ref<PassResult[]>([])
 const membersLoading = ref(false)
@@ -125,8 +143,22 @@ function memberStatusLabel(status: string): string {
 function memberStatusClass(status: string): string {
   if (status === 'weekly') return 'text-sky-300'
   if (status === 'monthly') return 'text-gold'
-  if (status === 'yearly') return 'text-purple-300'
   return 'text-mist'
+}
+
+function clientTypeLabelFor(member: PassResult): string {
+  return clientTypeLabel(member.customerType ?? 'non_member', (member.memberStatus ?? 'walkin') as MemberStatus)
+}
+
+function clientDefaultRateFor(member: PassResult): number {
+  return clientDefaultRate(member.customerType ?? 'non_member', (member.memberStatus ?? 'walkin') as MemberStatus)
+}
+
+function clientTypeClass(member: PassResult): string {
+  if (member.customerType === 'non_member') return 'text-mist'
+  if (member.memberStatus === 'weekly') return 'text-sky-300'
+  if (member.memberStatus === 'monthly') return 'text-gold'
+  return 'text-green-400'
 }
 
 const memberStatusCounts = computed(() => {
@@ -153,6 +185,10 @@ const filteredMembers = computed(() => {
   })
 })
 
+function manilaToday(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date())
+}
+
 const reportPeriod = ref<'day' | 'week' | 'month' | 'year'>('day')
 const reportPeriodLabel = computed(() => {
   if (reportPeriod.value === 'day') return 'Today'
@@ -160,9 +196,17 @@ const reportPeriodLabel = computed(() => {
   if (reportPeriod.value === 'month') return 'This Month'
   return 'This Year'
 })
+const reportGeneratedAtLabel = computed(() => reportGeneratedAt.value ? formatPdfDateTime(reportGeneratedAt.value) : '—')
 const reportLoading = ref(false)
 const reportError = ref('')
-const reportData = ref<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[] } | null>(null)
+const reportGeneratedAt = ref('')
+const reportData = ref<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[]; availableDates: string[] } | null>(null)
+
+const showExportModal = ref(false)
+const exportFrom = ref('')
+const exportTo = ref('')
+const exportLoading = ref(false)
+const exportError = ref('')
 
 const sortedVisits = computed(() => {
   if (!reportData.value) return []
@@ -354,6 +398,7 @@ async function submitWalkin() {
       phone: walkinPhone.value,
       emergencyContact: walkinForm.emergencyContact,
       memberStatus: walkinForm.memberStatus,
+      customerType: walkinForm.customerType,
     }, {
       label: `Register ${walkinForm.fullName}`,
       cacheInvalidates: ['passes'],
@@ -369,6 +414,7 @@ async function submitWalkin() {
     walkinPhoneLocal.value = ''
     walkinForm.emergencyContact = ''
     walkinForm.memberStatus = 'walkin'
+    walkinForm.customerType = 'non_member'
     if (data.restored) toast.info(data.message)
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
@@ -400,6 +446,7 @@ async function loadMembers() {
 function resetTabState(tab: StaffTab) {
   if (tab === 'reports') {
     reportPeriod.value = 'day'
+    reportGeneratedAt.value = ''
     reminderMessage.value = ''
     reminderError.value = ''
     visitLogLimit.value = 5
@@ -408,7 +455,8 @@ function resetTabState(tab: StaffTab) {
     selectedPass.value = null
     checkinMessage.value = ''
     checkinError.value = ''
-    checkinPaymentAmount.value = WALKIN_DEFAULT_FEE
+    checkinCustomerType.value = 'non_member'
+    checkinPaymentAmount.value = PLAN_RATES.non_member.daily
     membersFilter.value = ''
     membersSortAsc.value = true
     membersLimit.value = 5
@@ -420,6 +468,7 @@ function resetTabState(tab: StaffTab) {
     walkinForm.email = ''
     walkinForm.emergencyContact = ''
     walkinForm.memberStatus = 'walkin'
+    walkinForm.customerType = 'non_member'
     walkinPhoneLocal.value = ''
     walkinMessage.value = ''
     walkinPassCode.value = ''
@@ -427,14 +476,16 @@ function resetTabState(tab: StaffTab) {
   } else if (tab === 'payment') {
     clearTxMember()
     txForm.plan = 'monthly'
-    txForm.amount = 1499
+    txForm.customerType = 'member'
+    txForm.includeMembershipFee = false
+    txForm.includeInstructorFee = false
+    txForm.paidAmount = PLAN_RATES.member.monthly
     txForm.paymentMethod = 'cash'
     txForm.referenceNo = ''
     txForm.coach = ''
     txForm.note = ''
     txMemberSearch.value = ''
     txError.value = ''
-    paymentsStatusFilter.value = 'pending'
     paymentsError.value = ''
     paymentNoteInput.value = ''
     paymentPaidAmountInput.value = ''
@@ -460,11 +511,18 @@ watch(activeTab, (tab, prevTab) => {
   else if (tab === 'coaches') loadCoaches()
 })
 
+function syncCheckinFromPass(pass: PassResult) {
+  const type: CustomerType = pass.customerType === 'member' ? 'member' : 'non_member'
+  checkinCustomerType.value = type
+  const hasPlan = type === 'member' && (pass.memberStatus === 'weekly' || pass.memberStatus === 'monthly')
+  checkinPaymentAmount.value = hasPlan ? 0 : PLAN_RATES[type].daily
+}
+
 function selectPass(pass: PassResult) {
   selectedPass.value = pass
   checkinMessage.value = ''
   checkinError.value = ''
-  checkinPaymentAmount.value = WALKIN_DEFAULT_FEE
+  syncCheckinFromPass(pass)
 }
 
 async function checkIn(passCode: string, auto = false) {
@@ -547,7 +605,10 @@ async function updateMemberStatus(member: PassResult, memberStatus: string) {
     })
     const index = membersList.value.findIndex((m) => m.id === member.id)
     if (index !== -1) membersList.value[index] = data.pass
-    if (selectedPass.value?.id === member.id) selectedPass.value = data.pass
+    if (selectedPass.value?.id === member.id) {
+      selectedPass.value = data.pass
+      syncCheckinFromPass(data.pass)
+    }
     toast.success(data.message)
   } catch (err: unknown) {
     if (String(err).includes('Queued')) {
@@ -562,12 +623,55 @@ async function updateMemberStatus(member: PassResult, memberStatus: string) {
   }
 }
 
+async function updateCustomerType(member: PassResult, customerType: CustomerType) {
+  if (!customerType || customerType === (member.customerType ?? 'non_member')) return
+
+  memberStatusUpdating.value = member.id
+  membersError.value = ''
+
+  try {
+    const data = await cachedPost<{ pass: PassResult; message: string }>('/api/walkin/update-status', {
+      id: member.id,
+      customerType,
+    }, {
+      label: `Update client type for ${member.fullName}`,
+      cacheInvalidates: ['passes'],
+    })
+    const index = membersList.value.findIndex((m) => m.id === member.id)
+    if (index !== -1) membersList.value[index] = data.pass
+    if (selectedPass.value?.id === member.id) {
+      selectedPass.value = data.pass
+      syncCheckinFromPass(data.pass)
+    }
+    toast.success(data.message)
+  } catch (err: unknown) {
+    if (String(err).includes('Queued')) {
+      toast.warning('Client type update queued — will sync when back online.')
+    } else {
+      const fetchErr = err as { data?: { statusMessage?: string } }
+      membersError.value = fetchErr.data?.statusMessage ?? 'Failed to update client type.'
+      toast.error(fetchErr.data?.statusMessage ?? 'Failed to update client type.')
+    }
+  } finally {
+    memberStatusUpdating.value = ''
+  }
+}
+
+function onMemberToggle(member: PassResult, event: Event) {
+  const checked = (event.target as HTMLInputElement).checked
+  updateCustomerType(member, checked ? 'member' : 'non_member')
+}
+
 interface MembershipPayment {
   id: string
   fullName: string
   email: string
   phone: string
-  plan: 'weekly' | 'monthly' | 'yearly'
+  plan: MembershipPlanId
+  customerType: CustomerType
+  planPrice: number | null
+  membershipFee: number
+  instructorFee: number
   coach: string | null
   paymentMethod: string
   referenceNo: string | null
@@ -594,7 +698,6 @@ const paymentsList = ref<MembershipPayment[]>([])
 const paymentsSummary = ref<PaymentSummary | null>(null)
 const paymentsLoading = ref(false)
 const paymentsError = ref('')
-const paymentsStatusFilter = ref('pending')
 const paymentActionLoading = ref('')
 const paymentNoteInput = ref('')
 const paymentPaidAmountInput = ref('')
@@ -609,8 +712,11 @@ const txForm = reactive({
   memberName: '',
   memberPhone: '',
   memberEmail: '',
-  plan: 'monthly',
-  amount: 1499,
+  plan: 'monthly' as MembershipPlanId,
+  customerType: 'member' as CustomerType,
+  includeMembershipFee: false,
+  includeInstructorFee: false,
+  paidAmount: PLAN_RATES.member.monthly,
   paymentMethod: 'cash',
   referenceNo: '',
   coach: '',
@@ -639,14 +745,42 @@ const txExpiry = computed(() => {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(date)
 })
 
+const txPlanPrice = computed(() => PLAN_RATES[txForm.customerType][txForm.plan] ?? 0)
+const txFeeTotal = computed(() => (txForm.includeMembershipFee ? MEMBERSHIP_FEE : 0) + (txForm.includeInstructorFee ? INSTRUCTOR_FEE : 0))
+const txSuggestedAmount = computed(() => txPlanPrice.value + txFeeTotal.value)
+const txAmountValue = computed(() => txSuggestedAmount.value)
+const txPaidValue = computed(() => Number(txForm.paidAmount) || 0)
+const txPaymentStatus = computed(() => txPaidValue.value >= txAmountValue.value ? 'Full' : 'Partial')
+const txBalance = computed(() => Math.max(0, txAmountValue.value - txPaidValue.value))
+const txChange = computed(() => Math.max(0, txPaidValue.value - txAmountValue.value))
+
+function syncTxPaid(resetPaid = true) {
+  if (resetPaid) txForm.paidAmount = txSuggestedAmount.value
+}
+
+function setTxPlan(planId: MembershipPlanId) {
+  txForm.plan = planId
+  syncTxPaid()
+}
+
+function setTxCustomerType(type: CustomerType) {
+  txForm.customerType = type
+  syncTxPaid()
+}
+
+function toggleTxFee() {
+  syncTxPaid()
+}
+
 function selectTxMember(member: PassResult) {
   txForm.memberId = member.id
   txForm.memberName = member.fullName
   txForm.memberPhone = member.phone
   txForm.memberEmail = member.email
   txMemberSearch.value = ''
-  const suggested = MEMBERSHIP_PLAN_TERMS.find((t) => t.id === member.memberStatus)
-  if (suggested) setTxPlan(suggested.id)
+  txForm.customerType = member.customerType === 'member' ? 'member' : 'non_member'
+  const suggestedPlan: MembershipPlanId = member.memberStatus === 'walkin' ? 'daily' : member.memberStatus as MembershipPlanId
+  setTxPlan(suggestedPlan)
 }
 
 function clearTxMember() {
@@ -654,13 +788,7 @@ function clearTxMember() {
   txForm.memberName = ''
   txForm.memberPhone = ''
   txForm.memberEmail = ''
-  txForm.amount = 0
-}
-
-function setTxPlan(planId: string) {
-  txForm.plan = planId
-  const term = MEMBERSHIP_PLAN_TERMS.find((t) => t.id === planId)
-  txForm.amount = term?.amount ?? 0
+  syncTxPaid()
 }
 
 async function loadTxMembers() {
@@ -684,9 +812,14 @@ async function submitTransaction() {
     toast.error('Select a member first.')
     return
   }
-  if (!txForm.amount || txForm.amount <= 0) {
-    txError.value = 'Enter an amount greater than zero.'
-    toast.error('Enter an amount greater than zero.')
+  if (!txSuggestedAmount.value || txSuggestedAmount.value <= 0) {
+    txError.value = 'Select a valid plan and customer type.'
+    toast.error('Select a valid plan and customer type.')
+    return
+  }
+  if (!txForm.paidAmount || txForm.paidAmount <= 0) {
+    txError.value = 'Enter the amount the client paid.'
+    toast.error('Enter the amount the client paid.')
     return
   }
 
@@ -698,8 +831,10 @@ async function submitTransaction() {
       email: txForm.memberEmail,
       phone: txForm.memberPhone,
       plan: txForm.plan,
-      amount: txForm.amount,
-      paidAmount: txForm.amount,
+      customerType: txForm.customerType,
+      includeMembershipFee: txForm.includeMembershipFee,
+      includeInstructorFee: txForm.includeInstructorFee,
+      paidAmount: txForm.paidAmount,
       paymentMethod: txForm.paymentMethod,
       referenceNo: txForm.referenceNo,
       coach: txForm.coach,
@@ -711,11 +846,13 @@ async function submitTransaction() {
     toast.success(data.message)
     clearTxMember()
     txForm.plan = 'monthly'
-    txForm.amount = 1499
+    txForm.customerType = 'member'
+    txForm.includeMembershipFee = false
+    txForm.includeInstructorFee = false
+    txForm.paidAmount = PLAN_RATES.member.monthly
     txForm.referenceNo = ''
     txForm.coach = ''
     txForm.note = ''
-    paymentsStatusFilter.value = 'approved'
     await loadPayments()
   } catch (err: unknown) {
     if (String(err).includes('Queued')) {
@@ -759,10 +896,7 @@ async function loadPayments() {
   paymentsError.value = ''
   paymentsLoading.value = true
   try {
-    const params: Record<string, string> = {}
-    if (paymentsStatusFilter.value) params.status = paymentsStatusFilter.value
     const data = await cachedGet<{ payments: MembershipPayment[]; summary: PaymentSummary }>('/api/membership/list', {
-      params,
       cache: { store: 'clients', label: 'Payments' },
     })
     paymentsList.value = data.payments
@@ -886,6 +1020,11 @@ async function approvePartialPayment(payment: MembershipPayment) {
   }
 }
 
+function setReportPeriod(period: 'day' | 'week' | 'month' | 'year') {
+  reportPeriod.value = period
+  loadReports()
+}
+
 async function loadReports() {
   reportError.value = ''
   reportLoading.value = true
@@ -893,11 +1032,13 @@ async function loadReports() {
   visitLogLimit.value = 5
 
   try {
-    const data = await cachedGet<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[] }>('/api/staff/reports', {
-      params: { period: reportPeriod.value },
+    const params: Record<string, string> = { period: reportPeriod.value }
+    const data = await cachedGet<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[]; availableDates: string[] }>('/api/staff/reports', {
+      params,
       cache: { store: 'reports', label: 'Reports' },
     })
     reportData.value = data
+    reportGeneratedAt.value = new Date().toISOString()
   } catch {
     if (isOnline.value) toast.error('Failed to load reports.')
   } finally {
@@ -1112,39 +1253,287 @@ function statusClass(status: string) {
   return 'text-mist'
 }
 
-function exportReport() {
+function statusBadgeClass(status: string) {
+  if (status === 'registered') return 'border-gold/40 text-gold bg-gold/5'
+  if (status === 'checked_in') return 'border-green-400/40 text-green-400 bg-green-400/5'
+  return 'border-iron text-mist bg-obsidian/40'
+}
+
+function timeLabel(value: string | null): string {
+  if (!value) return '—'
+  return new Date(value).toLocaleTimeString('en-PH', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Manila',
+  })
+}
+
+function amountLabel(amount: number | null): string {
+  return amount ? `₱${amount.toLocaleString('en-PH')}` : '—'
+}
+
+function revenueShare(part: number, total: number): number {
+  if (!total) return 0
+  return Math.min(100, Math.round((part / total) * 100))
+}
+
+function openExportModal() {
   if (!reportData.value) return
+  exportError.value = ''
+  const summary = reportData.value.summary
+  const today = manilaToday()
+  exportFrom.value = summary.dateFrom || today
+  exportTo.value = summary.dateTo || today
+  showExportModal.value = true
+}
 
-  const esc = (s: string) => `"${(s ?? '').replace(/"/g, '""')}"`
-  const rows: string[] = []
-  rows.push('Date,Name,Email,Phone,Pass Code,Status,Amount,Checked In At')
-  for (const v of sortedVisits.value) {
+function formatPdfMoney(amount: number): string {
+  return `PHP ${Math.round(amount).toLocaleString('en-PH')}`
+}
+
+function formatPdfDate(value: string): string {
+  if (!value) return '—'
+  return new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`))
+}
+
+function formatPdfDateTime(value: string): string {
+  return new Intl.DateTimeFormat('en-PH', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Asia/Manila',
+  }).format(new Date(value))
+}
+
+async function downloadReportPdf(data: { visits: ReportVisit[]; summary: ReportSummary }) {
+  const { jsPDF } = await import('jspdf')
+  const { autoTable } = await import('jspdf-autotable')
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const pageHeight = doc.internal.pageSize.getHeight()
+  const margin = 14
+  const contentWidth = pageWidth - margin * 2
+
+  const gold: [number, number, number] = [186, 150, 78]
+  const ink: [number, number, number] = [28, 32, 38]
+  const muted: [number, number, number] = [108, 114, 122]
+  const line: [number, number, number] = [222, 225, 230]
+  const light: [number, number, number] = [247, 248, 250]
+  const highlight: [number, number, number] = [250, 246, 236]
+  const green: [number, number, number] = [32, 132, 82]
+  const blue: [number, number, number] = [40, 98, 170]
+  const white: [number, number, number] = [255, 255, 255]
+
+  doc.setFillColor(...gold)
+  doc.rect(0, 0, pageWidth, 3.5, 'F')
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(20)
+  doc.setTextColor(...ink)
+  doc.text('OASIS', margin, 18.5)
+  doc.setTextColor(...gold)
+  doc.text('FIT', margin + doc.getTextWidth('OASIS'), 18.5)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(7.5)
+  doc.setTextColor(...muted)
+  doc.text('FITNESS GYM', margin, 23.5)
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(8.5)
+  doc.setTextColor(...ink)
+  doc.text('BUSINESS REPORT', pageWidth - margin, 16.5, { align: 'right' })
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(7)
+  doc.setTextColor(...muted)
+  doc.text(`Generated ${formatPdfDateTime(new Date().toISOString())}`, pageWidth - margin, 21, { align: 'right' })
+
+  doc.setDrawColor(...line)
+  doc.setLineWidth(0.3)
+  doc.line(margin, 27, pageWidth - margin, 27)
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(14)
+  doc.setTextColor(...ink)
+  doc.text('Report Summary', margin, 36)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8.5)
+  doc.setTextColor(...muted)
+  const rangeText = data.summary.dateFrom === data.summary.dateTo
+    ? formatPdfDate(data.summary.dateFrom)
+    : `${formatPdfDate(data.summary.dateFrom)} — ${formatPdfDate(data.summary.dateTo)}`
+  doc.text(rangeText, pageWidth - margin, 36, { align: 'right' })
+
+  const cardY = 42
+  const cardGap = 4
+  const cardWidth = (contentWidth - cardGap * 3) / 4
+  const cardHeight = 23
+  const kpis: { label: string; value: string; accent: [number, number, number] }[] = [
+    { label: 'TOTAL VISITS', value: String(data.summary.totalVisits), accent: gold },
+    { label: 'CHECKED OUT', value: String(data.summary.checkedOut), accent: green },
+    { label: 'TOTAL REVENUE', value: formatPdfMoney(data.summary.totalRevenue), accent: gold },
+    { label: 'UNIQUE MEMBERS', value: String(data.summary.uniqueMembers), accent: blue },
+  ]
+
+  kpis.forEach((kpi, index) => {
+    const x = margin + index * (cardWidth + cardGap)
+    doc.setFillColor(...light)
+    doc.setDrawColor(...line)
+    doc.setLineWidth(0.25)
+    doc.roundedRect(x, cardY, cardWidth, cardHeight, 1.5, 1.5, 'FD')
+    doc.setFillColor(...kpi.accent)
+    doc.rect(x, cardY, 1.5, cardHeight, 'F')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(6.2)
+    doc.setTextColor(...muted)
+    doc.text(kpi.label, x + 4.5, cardY + 6.5)
+    doc.setFontSize(kpi.label === 'TOTAL REVENUE' ? 10.5 : 15)
+    doc.setTextColor(...ink)
+    doc.text(kpi.value, x + 4.5, cardY + 15.5)
+  })
+
+  const revenueTitleY = cardY + cardHeight + 10
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(10)
+  doc.setTextColor(...ink)
+  doc.text('Revenue Breakdown', margin, revenueTitleY)
+  doc.setDrawColor(...line)
+  doc.line(margin, revenueTitleY + 2, pageWidth - margin, revenueTitleY + 2)
+
+  const revenueBody = [
+    ['Walk-in Revenue', formatPdfMoney(data.summary.walkinRevenue)],
+    ['Membership Revenue', formatPdfMoney(data.summary.membershipRevenue)],
+    ['Total Revenue', formatPdfMoney(data.summary.totalRevenue)],
+  ]
+
+  autoTable(doc, {
+    startY: revenueTitleY + 5,
+    head: [['Source', 'Amount']],
+    body: revenueBody,
+    margin: { left: margin, right: margin },
+    theme: 'grid',
+    styles: {
+      font: 'helvetica',
+      fontSize: 8,
+      cellPadding: 2.4,
+      textColor: ink,
+      lineColor: line,
+      lineWidth: 0.2,
+    },
+    headStyles: { fillColor: gold, textColor: white, fontStyle: 'bold', fontSize: 7.5 },
+    columnStyles: {
+      0: { cellWidth: contentWidth * 0.72 },
+      1: { halign: 'right', cellWidth: contentWidth * 0.28 },
+    },
+    didParseCell: (hookData) => {
+      if (hookData.section === 'body' && hookData.row.index === revenueBody.length - 1) {
+        hookData.cell.styles.fontStyle = 'bold'
+        hookData.cell.styles.fillColor = highlight
+      }
+    },
+  })
+
+  const sorted = [...data.visits].sort((a, b) => {
+    const aTime = a.checkedInAt || a.createdAt
+    const bTime = b.checkedInAt || b.createdAt
+    return new Date(bTime).getTime() - new Date(aTime).getTime()
+  })
+
+  const revenueEndY = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? revenueTitleY + 20
+  const logTitleY = revenueEndY + 9
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(10)
+  doc.setTextColor(...ink)
+  doc.text(`Visit Log (${sorted.length} ${sorted.length === 1 ? 'entry' : 'entries'})`, margin, logTitleY)
+  doc.setDrawColor(...line)
+  doc.line(margin, logTitleY + 2, pageWidth - margin, logTitleY + 2)
+
+  const visitBody = sorted.map((v) => {
     const status = v.status === 'checked_in' ? 'Checked Out' : v.status === 'registered' ? 'Registered' : 'Expired'
-    const amount = v.paymentAmount ? `₱${v.paymentAmount}` : '—'
-    const checkinTime = v.checkedInAt ? new Date(v.checkedInAt).toLocaleString('en-PH', { timeZone: 'Asia/Manila' }) : '—'
-    rows.push([esc(v.visitDate), esc(v.fullName), esc(v.email), esc(v.phone), esc(v.passCode), esc(status), esc(amount), esc(checkinTime)].join(','))
-  }
-  rows.push('')
-  rows.push('Summary')
-  rows.push(`Total Visits,${reportData.value.summary.totalVisits}`)
-  rows.push(`Checked Out,${reportData.value.summary.checkedOut}`)
-  rows.push(`Total Revenue,₱${reportData.value.summary.totalRevenue}`)
-  rows.push(`Walk-in Revenue,₱${reportData.value.summary.walkinRevenue}`)
-  rows.push(`Membership Revenue,₱${reportData.value.summary.membershipRevenue}`)
-  rows.push(`Unique Members,${reportData.value.summary.uniqueMembers}`)
-  rows.push(`Period,${reportData.value.summary.period}`)
-  rows.push(`Date From,${reportData.value.summary.dateFrom}`)
-  rows.push(`Date To,${reportData.value.summary.dateTo}`)
+    const amount = v.paymentAmount ? formatPdfMoney(v.paymentAmount) : '—'
+    const time = v.checkedInAt
+      ? new Date(v.checkedInAt).toLocaleTimeString('en-PH', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Manila',
+      })
+      : '—'
+    return [v.visitDate, time, v.fullName, v.passCode, amount, status]
+  })
 
-  const csv = '\uFEFF' + rows.join('\n')
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  const periodLabel = reportData.value.summary.period === 'day' ? reportData.value.summary.dateFrom : `${reportData.value.summary.dateFrom}-to-${reportData.value.summary.dateTo}`
-  link.download = `oasis-visit-log-${periodLabel}.csv`
-  link.click()
-  URL.revokeObjectURL(url)
+  autoTable(doc, {
+    startY: logTitleY + 5,
+    head: [['Date', 'Time', 'Name', 'Pass Code', 'Amount', 'Status']],
+    body: visitBody.length > 0 ? visitBody : [['—', '—', 'No visits recorded for this period.', '—', '—', '—']],
+    margin: { left: margin, right: margin, top: 16, bottom: 18 },
+    theme: 'striped',
+    styles: {
+      font: 'helvetica',
+      fontSize: 7.5,
+      cellPadding: 2,
+      textColor: ink,
+      lineColor: line,
+      lineWidth: 0.15,
+      overflow: 'linebreak',
+      valign: 'middle',
+    },
+    headStyles: { fillColor: gold, textColor: white, fontStyle: 'bold', fontSize: 7 },
+    alternateRowStyles: { fillColor: [249, 250, 251] },
+    columnStyles: {
+      0: { cellWidth: 22 },
+      1: { cellWidth: 18 },
+      2: { cellWidth: 55 },
+      3: { cellWidth: 28 },
+      4: { cellWidth: 30, halign: 'right' },
+      5: { cellWidth: 29 },
+    },
+  })
+
+  const totalPages = doc.getNumberOfPages()
+  for (let page = 1; page <= totalPages; page++) {
+    doc.setPage(page)
+    doc.setDrawColor(...line)
+    doc.setLineWidth(0.2)
+    doc.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(6.8)
+    doc.setTextColor(...muted)
+    doc.text('Oasis Fitness Gym · Confidential business report', margin, pageHeight - 7)
+    doc.text(`Page ${page} of ${totalPages}`, pageWidth - margin, pageHeight - 7, { align: 'right' })
+  }
+
+  const fileLabel = data.summary.dateFrom === data.summary.dateTo
+    ? data.summary.dateFrom
+    : `${data.summary.dateFrom}-to-${data.summary.dateTo}`
+  doc.save(`oasis-report-${fileLabel}.pdf`)
+}
+
+async function exportRange() {
+  exportError.value = ''
+  if (!exportFrom.value || !exportTo.value) {
+    exportError.value = 'Select both a from and to date.'
+    return
+  }
+  if (exportFrom.value > exportTo.value) {
+    exportError.value = 'The from date must be before the to date.'
+    return
+  }
+
+  exportLoading.value = true
+  try {
+    const data = await cachedGet<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[]; availableDates: string[] }>('/api/staff/reports', {
+      params: { from: exportFrom.value, to: exportTo.value },
+      cache: { store: 'reports', label: 'Export report' },
+    })
+    await downloadReportPdf(data)
+    showExportModal.value = false
+  } catch {
+    if (isOnline.value) toast.error('Failed to export report.')
+  } finally {
+    exportLoading.value = false
+  }
 }
 
 onMounted(async () => {
@@ -1229,7 +1618,7 @@ onMounted(async () => {
             :class="activeTab === 'walkin' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
             @click="activeTab = 'walkin'"
           >
-            Walk-in
+            Register
           </button>
           <button
             type="button"
@@ -1277,7 +1666,7 @@ onMounted(async () => {
                 type="button"
                 class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
                 :class="reportPeriod === 'day' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
-                @click="reportPeriod = 'day'; loadReports()"
+                @click="setReportPeriod('day')"
               >
                 Today
               </button>
@@ -1285,7 +1674,7 @@ onMounted(async () => {
                 type="button"
                 class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
                 :class="reportPeriod === 'week' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
-                @click="reportPeriod = 'week'; loadReports()"
+                @click="setReportPeriod('week')"
               >
                 This Week
               </button>
@@ -1293,7 +1682,7 @@ onMounted(async () => {
                 type="button"
                 class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
                 :class="reportPeriod === 'month' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
-                @click="reportPeriod = 'month'; loadReports()"
+                @click="setReportPeriod('month')"
               >
                 This Month
               </button>
@@ -1301,59 +1690,165 @@ onMounted(async () => {
                 type="button"
                 class="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider border transition-colors"
                 :class="reportPeriod === 'year' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:border-gold/50'"
-                @click="reportPeriod = 'year'; loadReports()"
+                @click="setReportPeriod('year')"
               >
                 This Year
               </button>
-              <button v-if="reportData" type="button" class="btn-outline px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs ml-auto" @click="exportReport">
-                Export CSV
+              <button v-if="reportData" type="button" class="btn-outline px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs ml-auto" @click="openExportModal">
+                Export PDF
               </button>
             </div>
+
+            <Teleport to="body">
+              <div
+                v-if="showExportModal"
+                class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-onyx/90 backdrop-blur-sm"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Export report"
+                @click.self="showExportModal = false"
+              >
+                <div class="bg-graphite border border-iron rounded-sm max-w-sm w-full p-5 sm:p-6">
+                  <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-1">Export PDF Report</h2>
+                  <p class="text-mist text-[10px] sm:text-xs mb-4">Select the date range to include in the printable report.</p>
+
+                  <div class="space-y-3">
+                    <div>
+                      <label for="export-from" class="block text-[11px] sm:text-sm text-mist mb-1">From *</label>
+                      <input
+                        id="export-from"
+                        v-model="exportFrom"
+                        type="date"
+                        class="input-field"
+                      />
+                    </div>
+                    <div>
+                      <label for="export-to" class="block text-[11px] sm:text-sm text-mist mb-1">To *</label>
+                      <input
+                        id="export-to"
+                        v-model="exportTo"
+                        type="date"
+                        class="input-field"
+                      />
+                    </div>
+                  </div>
+
+                  <p v-if="exportError" class="text-red-400 text-xs sm:text-sm mt-3">{{ exportError }}</p>
+
+                  <div class="flex gap-2 mt-4">
+                    <button type="button" class="btn-outline flex-1 text-[10px] sm:text-xs" @click="showExportModal = false">
+                      Cancel
+                    </button>
+                    <button type="button" class="btn-primary flex-1 text-[10px] sm:text-xs" :disabled="exportLoading" @click="exportRange">
+                      {{ exportLoading ? 'Generating…' : 'Export PDF' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </Teleport>
 
             <div v-if="reportLoading" class="text-center py-10">
               <p class="text-mist text-xs sm:text-sm">Loading report…</p>
             </div>
 
             <template v-else-if="reportData">
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
-                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
-                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Total Visits</p>
-                  <p class="font-display text-2xl sm:text-3xl text-gold">{{ reportData.summary.totalVisits }}</p>
-                </div>
-                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
-                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Checked Out</p>
-                  <p class="font-display text-2xl sm:text-3xl text-green-400">{{ reportData.summary.checkedOut }}</p>
-                </div>
-                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center col-span-2 sm:col-span-1">
-                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Total Revenue</p>
-                  <p class="font-display text-2xl sm:text-3xl text-gold">₱{{ reportData.summary.totalRevenue.toLocaleString() }}</p>
-                  <div class="flex justify-center gap-3 mt-1">
-                    <span class="text-[9px] sm:text-[10px] text-green-400">₱{{ reportData.summary.walkinRevenue.toLocaleString() }} walk-in</span>
-                    <span class="text-[9px] sm:text-[10px] text-blue-400">₱{{ reportData.summary.membershipRevenue.toLocaleString() }} membership</span>
+              <div class="border border-iron bg-obsidian/40 mb-4 sm:mb-6">
+                <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 px-4 sm:px-5 py-4 border-b border-iron">
+                  <div>
+                    <p class="text-gold text-[9px] sm:text-[10px] uppercase tracking-[0.2em] mb-1">Oasis Fitness Gym</p>
+                    <h3 class="font-display text-lg sm:text-2xl text-cream tracking-wide">Business Report</h3>
+                    <p class="text-mist text-[10px] sm:text-xs mt-1">
+                      {{ reportPeriodLabel }} · <span class="text-cream/80">{{ reportData.summary.dateFrom }}</span> — <span class="text-cream/80">{{ reportData.summary.dateTo }}</span>
+                    </p>
+                  </div>
+                  <div class="sm:text-right">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Generated</p>
+                    <p class="text-cream text-[10px] sm:text-xs">{{ reportGeneratedAtLabel }}</p>
                   </div>
                 </div>
-                <div class="bg-graphite border border-iron p-3 sm:p-4 text-center">
-                  <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider mb-1">Unique Members</p>
-                  <p class="font-display text-2xl sm:text-3xl text-gold">{{ reportData.summary.uniqueMembers }}</p>
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-px bg-iron">
+                  <div class="bg-onyx px-4 py-3 sm:py-4">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Total Visits</p>
+                    <p class="font-display text-2xl sm:text-3xl text-cream tabular-nums">{{ reportData.summary.totalVisits }}</p>
+                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">Recorded check-ins</p>
+                  </div>
+                  <div class="bg-onyx px-4 py-3 sm:py-4">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Checked Out</p>
+                    <p class="font-display text-2xl sm:text-3xl text-green-400 tabular-nums">{{ reportData.summary.checkedOut }}</p>
+                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">Completed sessions</p>
+                  </div>
+                  <div class="bg-onyx px-4 py-3 sm:py-4">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Total Revenue</p>
+                    <p class="font-display text-2xl sm:text-3xl text-gold tabular-nums">₱{{ reportData.summary.totalRevenue.toLocaleString() }}</p>
+                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">Walk-in + membership</p>
+                  </div>
+                  <div class="bg-onyx px-4 py-3 sm:py-4">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Unique Members</p>
+                    <p class="font-display text-2xl sm:text-3xl text-blue-400 tabular-nums">{{ reportData.summary.uniqueMembers }}</p>
+                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">Distinct clients</p>
+                  </div>
                 </div>
               </div>
 
-              <p class="text-mist text-[10px] sm:text-xs mb-3 sm:mb-4">
-                {{ reportPeriodLabel }}: <span class="text-cream font-medium">{{ reportData.summary.dateFrom }}</span> — <span class="text-cream font-medium">{{ reportData.summary.dateTo }}</span>
-              </p>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
+                <div class="border border-iron bg-graphite/40 p-4">
+                  <div class="flex items-start justify-between gap-2">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Walk-in Revenue</p>
+                    <span class="text-gold text-[10px] sm:text-xs font-semibold tabular-nums">{{ revenueShare(reportData.summary.walkinRevenue, reportData.summary.totalRevenue) }}%</span>
+                  </div>
+                  <p class="font-display text-xl sm:text-2xl text-gold tabular-nums mt-1">₱{{ reportData.summary.walkinRevenue.toLocaleString() }}</p>
+                  <div class="h-1.5 bg-iron/60 mt-3 overflow-hidden">
+                    <div class="h-full bg-gold" :style="{ width: `${revenueShare(reportData.summary.walkinRevenue, reportData.summary.totalRevenue)}%` }" />
+                  </div>
+                </div>
+                <div class="border border-iron bg-graphite/40 p-4">
+                  <div class="flex items-start justify-between gap-2">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Membership Revenue</p>
+                    <span class="text-blue-400 text-[10px] sm:text-xs font-semibold tabular-nums">{{ revenueShare(reportData.summary.membershipRevenue, reportData.summary.totalRevenue) }}%</span>
+                  </div>
+                  <p class="font-display text-xl sm:text-2xl text-blue-400 tabular-nums mt-1">₱{{ reportData.summary.membershipRevenue.toLocaleString() }}</p>
+                  <div class="h-1.5 bg-iron/60 mt-3 overflow-hidden">
+                    <div class="h-full bg-blue-400" :style="{ width: `${revenueShare(reportData.summary.membershipRevenue, reportData.summary.totalRevenue)}%` }" />
+                  </div>
+                </div>
+                <div class="border border-iron bg-graphite/40 p-4">
+                  <div class="flex items-start justify-between gap-2">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Combined Revenue</p>
+                    <span class="text-cream text-[10px] sm:text-xs font-semibold tabular-nums">100%</span>
+                  </div>
+                  <p class="font-display text-xl sm:text-2xl text-cream tabular-nums mt-1">₱{{ reportData.summary.totalRevenue.toLocaleString() }}</p>
+                  <div class="h-1.5 bg-iron/60 mt-3 flex overflow-hidden">
+                    <div class="h-full bg-gold" :style="{ width: `${revenueShare(reportData.summary.walkinRevenue, reportData.summary.totalRevenue)}%` }" />
+                    <div class="h-full bg-blue-400" :style="{ width: `${revenueShare(reportData.summary.membershipRevenue, reportData.summary.totalRevenue)}%` }" />
+                  </div>
+                </div>
+              </div>
 
-              <div v-if="reportData?.chartData?.length > 0 && reportData.chartData.some(p => p.revenue > 0)" class="mb-4 sm:mb-6">
-                <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">
-                  {{ reportPeriodLabel }} — Revenue
-                </h3>
-                <div class="overflow-x-auto">
-                  <div class="flex items-end gap-1 sm:gap-1.5 min-h-[160px] sm:min-h-[200px] px-2 pb-8">
+              <div v-if="reportData?.chartData?.length > 0 && reportData.chartData.some(p => p.revenue > 0)" class="border border-iron bg-graphite/30 mb-4 sm:mb-6">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 border-b border-iron">
+                  <div>
+                    <h3 class="font-display text-base sm:text-lg text-cream tracking-wide">Revenue Trend</h3>
+                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">{{ reportPeriodLabel }} · walk-in vs membership</p>
+                  </div>
+                  <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-1.5">
+                      <div class="w-2.5 h-2.5 bg-gold rounded-sm" />
+                      <span class="text-[9px] sm:text-[10px] text-mist uppercase tracking-wider">Walk-in</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <div class="w-2.5 h-2.5 bg-blue-400 rounded-sm" />
+                      <span class="text-[9px] sm:text-[10px] text-mist uppercase tracking-wider">Membership</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="overflow-x-auto p-4">
+                  <div class="flex items-end gap-1 sm:gap-1.5 min-h-[160px] sm:min-h-[200px] px-2 pb-8 border-b border-iron/60">
                     <div
                       v-for="point in reportData.chartData"
                       :key="point.date"
                       class="flex-1 flex flex-col items-center gap-1 min-w-[28px] sm:min-w-[36px]"
                     >
-                      <span v-if="point.revenue > 0" class="text-[8px] sm:text-[10px] text-gold font-semibold">₱{{ point.revenue.toLocaleString() }}</span>
+                      <span v-if="point.revenue > 0" class="text-[8px] sm:text-[10px] text-gold font-semibold tabular-nums">₱{{ point.revenue.toLocaleString() }}</span>
                       <div class="w-full flex flex-col" :style="{ height: point.revenue > 0 ? `${Math.max((point.revenue / maxRevenue) * 100, 12)}%` : '4px' }">
                         <div
                           v-if="point.membershipRevenue > 0"
@@ -1369,61 +1864,62 @@ onMounted(async () => {
                       <span class="text-[8px] sm:text-[10px] text-mist font-medium">{{ point.label }}</span>
                     </div>
                   </div>
-                  <div class="flex items-center gap-4 mt-1 justify-center">
-                    <div class="flex items-center gap-1">
-                      <div class="w-3 h-3 bg-gold rounded-sm" />
-                      <span class="text-[9px] sm:text-[10px] text-mist">Walk-in</span>
-                    </div>
-                    <div class="flex items-center gap-1">
-                      <div class="w-3 h-3 bg-blue-400 rounded-sm" />
-                      <span class="text-[9px] sm:text-[10px] text-mist">Membership</span>
-                    </div>
-                  </div>
                 </div>
               </div>
 
-              <div v-if="sortedVisits.length > 0">
-                <h3 class="font-display text-base sm:text-lg text-cream tracking-wide mb-3 sm:mb-4">
-                  Visit Log <span class="text-mist text-xs sm:text-sm font-body">({{ sortedVisits.length }} total)</span>
-                </h3>
-                <div class="overflow-x-auto">
-                  <table class="w-full text-[10px] sm:text-xs min-w-[450px]">
+              <div class="border border-iron bg-graphite/30">
+                <div class="flex items-center justify-between gap-2 px-4 py-3 border-b border-iron">
+                  <div>
+                    <h3 class="font-display text-base sm:text-lg text-cream tracking-wide">Visit Log</h3>
+                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">{{ sortedVisits.length }} total entries</p>
+                  </div>
+                  <span class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">{{ reportPeriodLabel }}</span>
+                </div>
+                <div v-if="sortedVisits.length > 0" class="overflow-x-auto">
+                  <table class="w-full text-[10px] sm:text-xs min-w-[560px]">
                     <thead>
-                      <tr class="border-b border-iron">
-                        <th class="text-left p-2 sm:p-3 text-gold font-display tracking-wide">Date</th>
-                        <th class="text-left p-2 sm:p-3 text-gold font-display tracking-wide">Name</th>
-                        <th class="text-left p-2 sm:p-3 text-gold font-display tracking-wide">Pass Code</th>
-                        <th class="text-right p-2 sm:p-3 text-gold font-display tracking-wide">Amount</th>
-                        <th class="text-left p-2 sm:p-3 text-gold font-display tracking-wide">Status</th>
+                      <tr class="bg-obsidian/60 border-b border-iron">
+                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Date</th>
+                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Name</th>
+                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Pass Code</th>
+                        <th class="text-right p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Amount</th>
+                        <th class="text-right p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Status</th>
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="v in sortedVisits.slice(0, visitLogLimit)" :key="v.id" class="border-b border-iron/50 last:border-0">
-                        <td class="p-2 sm:p-3 text-cream whitespace-nowrap">{{ v.visitDate }}<br><span class="text-cream/70"> {{ new Date(v.checkedInAt || v.createdAt).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' }) }}</span></td>
-                        <td class="p-2 sm:p-3 text-cream">{{ v.fullName }}</td>
-                        <td class="p-2 sm:p-3 text-gold font-display tracking-wider">{{ v.passCode }}</td>
-                        <td class="p-2 sm:p-3 text-cream text-right">{{ v.paymentAmount ? `₱${v.paymentAmount}` : '—' }}</td>
-                        <td class="p-2 sm:p-3">
-                          <span :class="statusClass(v.status)">{{ statusLabel(v.status) }}</span>
+                      <tr v-for="v in sortedVisits.slice(0, visitLogLimit)" :key="v.id" class="border-b border-iron/40 last:border-0 hover:bg-obsidian/30 transition-colors">
+                        <td class="p-2.5 sm:p-3 whitespace-nowrap">
+                          <span class="text-cream">{{ v.visitDate }}</span>
+                          <span class="text-mist text-[9px] sm:text-[10px] ml-1.5">{{ timeLabel(v.checkedInAt || v.createdAt) }}</span>
+                        </td>
+                        <td class="p-2.5 sm:p-3 text-cream">{{ v.fullName }}</td>
+                        <td class="p-2.5 sm:p-3 text-gold font-display tracking-wider">{{ v.passCode }}</td>
+                        <td class="p-2.5 sm:p-3 text-cream text-right tabular-nums">{{ amountLabel(v.paymentAmount) }}</td>
+                        <td class="p-2.5 sm:p-3 text-right">
+                          <span class="inline-flex items-center px-2 py-0.5 text-[9px] sm:text-[10px] uppercase tracking-wider border" :class="statusBadgeClass(v.status)">
+                            {{ statusLabel(v.status) }}
+                          </span>
                         </td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
-                <div v-if="sortedVisits.length > visitLogLimit" class="text-center mt-3">
-                  <button type="button" class="text-gold text-[11px] sm:text-xs uppercase tracking-wider hover:underline" @click="visitLogLimit += 5">
-                    Show More ({{ sortedVisits.length - visitLogLimit }} remaining)
-                  </button>
+                <div v-else class="text-center py-10">
+                  <p class="text-mist text-xs sm:text-sm">No visits found for this period.</p>
                 </div>
-                <div v-if="visitLogLimit > 5 && sortedVisits.length > 5" class="text-center mt-2">
-                  <button type="button" class="text-mist text-[10px] sm:text-[11px] uppercase tracking-wider hover:text-cream" @click="visitLogLimit = 5">
-                    Show Less
-                  </button>
+                <div v-if="sortedVisits.length > 0" class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 border-t border-iron">
+                  <p class="text-mist text-[9px] sm:text-[10px]">
+                    Showing {{ Math.min(visitLogLimit, sortedVisits.length) }} of {{ sortedVisits.length }} entries
+                  </p>
+                  <div class="flex gap-3">
+                    <button v-if="visitLogLimit > 5 && sortedVisits.length > 5" type="button" class="text-mist text-[10px] sm:text-[11px] uppercase tracking-wider hover:text-cream" @click="visitLogLimit = 5">
+                      Show Less
+                    </button>
+                    <button v-if="sortedVisits.length > visitLogLimit" type="button" class="text-gold text-[10px] sm:text-xs uppercase tracking-wider hover:underline" @click="visitLogLimit += 5">
+                      Show More ({{ sortedVisits.length - visitLogLimit }})
+                    </button>
+                  </div>
                 </div>
-              </div>
-
-              <div v-else class="text-center py-6">
-                <p class="text-mist text-xs sm:text-sm">No visits found for this period.</p>
               </div>
             </template>
 
@@ -1569,9 +2065,22 @@ onMounted(async () => {
                     <div class="min-w-0">
                       <p class="text-cream font-medium text-sm sm:text-base truncate">{{ member.fullName }}</p>
                       <p class="text-mist text-xs sm:text-sm truncate">{{ member.phone }}</p>
-                      <p class="text-[10px] sm:text-xs uppercase tracking-wider mt-0.5" :class="memberStatusClass(member.memberStatus)">
-                        {{ memberStatusLabel(member.memberStatus) }}
+                      <p class="text-[10px] sm:text-xs uppercase tracking-wider mt-0.5" :class="clientTypeClass(member)">
+                        {{ clientTypeLabelFor(member) }}
                       </p>
+                      <p class="text-mist text-[10px] sm:text-xs mt-0.5">
+                        Default: ₱{{ clientDefaultRateFor(member).toLocaleString() }}
+                      </p>
+                      <label class="inline-flex items-center gap-1.5 mt-1 text-[10px] sm:text-xs text-mist cursor-pointer" @click.stop>
+                        <input
+                          type="checkbox"
+                          class="accent-gold"
+                          :checked="member.customerType === 'member'"
+                          :disabled="memberStatusUpdating === member.id"
+                          @change="onMemberToggle(member, $event)"
+                        />
+                        Member
+                      </label>
                     </div>
                     <div class="shrink-0 text-right">
                       <span class="block text-[10px] sm:text-xs uppercase tracking-wider" :class="statusClass(member.status)">
@@ -1667,6 +2176,14 @@ onMounted(async () => {
                     <dt class="text-mist shrink-0">Membership</dt>
                     <dd :class="memberStatusClass(selectedPass.memberStatus)">{{ memberStatusLabel(selectedPass.memberStatus) }}</dd>
                   </div>
+                  <div class="flex justify-between gap-3 sm:gap-4">
+                    <dt class="text-mist shrink-0">Client Type</dt>
+                    <dd class="text-right" :class="clientTypeClass(selectedPass)">{{ clientTypeLabelFor(selectedPass) }}</dd>
+                  </div>
+                  <div class="flex justify-between gap-3 sm:gap-4">
+                    <dt class="text-mist shrink-0">Default Rate</dt>
+                    <dd class="text-cream text-right">₱{{ clientDefaultRateFor(selectedPass).toLocaleString() }}</dd>
+                  </div>
                 </dl>
 
                 <div class="mb-4 sm:mb-6">
@@ -1686,6 +2203,30 @@ onMounted(async () => {
                   </div>
                 </div>
 
+                <div class="mb-4 sm:mb-6">
+                  <p class="block text-[11px] sm:text-sm text-mist mb-1 sm:mb-2">Change Customer Type</p>
+                  <div class="grid grid-cols-2 gap-1.5 sm:gap-2">
+                    <button
+                      type="button"
+                      class="border px-2 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider transition-colors"
+                      :class="selectedPass.customerType === 'member' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:text-cream'"
+                      :disabled="memberStatusUpdating === selectedPass.id"
+                      @click="updateCustomerType(selectedPass, 'member')"
+                    >
+                      Member
+                    </button>
+                    <button
+                      type="button"
+                      class="border px-2 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider transition-colors"
+                      :class="selectedPass.customerType !== 'member' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:text-cream'"
+                      :disabled="memberStatusUpdating === selectedPass.id"
+                      @click="updateCustomerType(selectedPass, 'non_member')"
+                    >
+                      Non-member
+                    </button>
+                  </div>
+                </div>
+
                 <div v-if="selectedPass.status === 'registered'" class="mb-4 sm:mb-6">
                   <label for="co-pay-amount" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Payment Amount (₱)</label>
                   <input
@@ -1695,8 +2236,9 @@ onMounted(async () => {
                     min="0"
                     step="1"
                     class="input-field"
-                    :placeholder="`Default: ₱${WALKIN_DEFAULT_FEE}`"
+                    :placeholder="`Default: ₱${PLAN_RATES[checkinCustomerType].daily}`"
                   />
+                  <p class="text-mist text-[10px] sm:text-xs mt-1">Plan members consume 1 session on check-in.</p>
                 </div>
 
                 <p v-if="checkinError" class="text-red-400 text-xs sm:text-sm text-center mb-3">{{ checkinError }}</p>
@@ -1734,16 +2276,51 @@ onMounted(async () => {
           </Teleport>
         </template>
 
-        <!-- WALK-IN TAB -->
+        <!-- REGISTER TAB -->
         <template v-if="activeTab === 'walkin'">
           <section class="card p-4 sm:p-6">
-            <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">Register Walk-in</h2>
+            <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-3 sm:mb-4">Register Client</h2>
             <p class="text-mist text-[11px] sm:text-sm mb-3 sm:mb-6">
-              Register a new walk-in guest. They will receive a permanent pass code for future visits.
+              Register a new client. They will receive a permanent pass code for future visits.
             </p>
 
             <template v-if="!walkinPassCode">
               <form class="space-y-3 sm:space-y-4" @submit.prevent="submitWalkin">
+                <fieldset>
+                  <legend class="block text-[11px] sm:text-sm text-mist mb-1 sm:mb-2">Customer Type *</legend>
+                  <div class="grid grid-cols-2 gap-2">
+                    <label
+                      class="flex items-center gap-2 border px-3 py-2 cursor-pointer transition-colors text-xs sm:text-sm"
+                      :class="walkinForm.customerType === 'member' ? 'border-gold text-gold' : 'border-iron text-mist hover:text-cream'"
+                    >
+                      <input
+                        v-model="walkinForm.customerType"
+                        type="radio"
+                        name="customer-type"
+                        value="member"
+                        class="accent-gold"
+                      />
+                      Member
+                    </label>
+                    <label
+                      class="flex items-center gap-2 border px-3 py-2 cursor-pointer transition-colors text-xs sm:text-sm"
+                      :class="walkinForm.customerType === 'non_member' ? 'border-gold text-gold' : 'border-iron text-mist hover:text-cream'"
+                    >
+                      <input
+                        v-model="walkinForm.customerType"
+                        type="radio"
+                        name="customer-type"
+                        value="non_member"
+                        class="accent-gold"
+                      />
+                      Non-member
+                    </label>
+                  </div>
+                  <p class="text-mist text-[10px] sm:text-xs mt-1">
+                    Default rate: ₱{{ walkinDefaultRate.toLocaleString() }}
+                  </p>
+                </fieldset>
+
                 <fieldset>
                   <legend class="block text-[11px] sm:text-sm text-mist mb-1 sm:mb-2">Membership Status *</legend>
                   <div class="grid grid-cols-2 gap-2">
@@ -1803,7 +2380,7 @@ onMounted(async () => {
                 </div>
 
                 <button type="submit" class="btn-primary w-full" :disabled="walkinSubmitting">
-                  {{ walkinSubmitting ? 'Registering…' : 'Register Walk-in' }}
+                  {{ walkinSubmitting ? 'Registering…' : 'Register Client' }}
                 </button>
               </form>
             </template>
@@ -1837,7 +2414,7 @@ onMounted(async () => {
           <section class="card p-4 sm:p-6 mb-4 sm:mb-6">
             <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-1">Record Membership Transaction</h2>
             <p class="text-mist text-[10px] sm:text-xs mb-4 sm:mb-5">
-              Charge a member for the plan they availed. Recorded as paid, expiry is set automatically.
+              Charge a member for the plan they availed. Enter the amount actually paid and the status is detected automatically (Full or Partial). Expiry is set from the plan.
             </p>
 
             <!-- Member picker -->
@@ -1868,7 +2445,7 @@ onMounted(async () => {
                     >
                       <p class="text-cream text-xs sm:text-sm truncate">{{ member.fullName }}</p>
                       <p class="text-mist text-[10px] sm:text-xs">
-                        {{ member.phone }} · <span :class="memberStatusClass(member.memberStatus)">{{ memberStatusLabel(member.memberStatus) }}</span>
+                        {{ member.phone }} · <span :class="clientTypeClass(member)">{{ clientTypeLabelFor(member) }}</span> · ₱{{ clientDefaultRateFor(member).toLocaleString() }}
                       </p>
                     </button>
                   </li>
@@ -1892,14 +2469,53 @@ onMounted(async () => {
                   @click="setTxPlan(term.id)"
                 >
                   {{ term.label }}
+                  <span class="block text-[9px] normal-case tracking-normal text-mist">₱{{ PLAN_RATES[txForm.customerType][term.id] }}</span>
                 </button>
               </div>
             </div>
 
+            <!-- Customer type -->
+            <div class="mb-4">
+              <label class="block text-[11px] sm:text-sm text-mist mb-1 sm:mb-2">Customer Type *</label>
+              <div class="grid grid-cols-2 gap-1.5 sm:gap-2">
+                <button
+                  type="button"
+                  class="border px-2 py-2 text-[10px] sm:text-xs uppercase tracking-wider transition-colors"
+                  :class="txForm.customerType === 'member' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:text-cream'"
+                  @click="setTxCustomerType('member')"
+                >
+                  Member
+                </button>
+                <button
+                  type="button"
+                  class="border px-2 py-2 text-[10px] sm:text-xs uppercase tracking-wider transition-colors"
+                  :class="txForm.customerType === 'non_member' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:text-cream'"
+                  @click="setTxCustomerType('non_member')"
+                >
+                  Non-member
+                </button>
+              </div>
+            </div>
+
+            <!-- Add-ons -->
+            <div class="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label class="flex items-center gap-2 border border-iron px-3 py-2 cursor-pointer hover:border-gold/50 transition-colors">
+                <input v-model="txForm.includeMembershipFee" type="checkbox" class="accent-gold" @change="toggleTxFee" />
+                <span class="text-[10px] sm:text-xs text-cream">Membership fee (+₱{{ MEMBERSHIP_FEE }})</span>
+              </label>
+              <label class="flex items-center gap-2 border border-iron px-3 py-2 cursor-pointer hover:border-gold/50 transition-colors">
+                <input v-model="txForm.includeInstructorFee" type="checkbox" class="accent-gold" @change="toggleTxFee" />
+                <span class="text-[10px] sm:text-xs text-cream">Instructor fee (+₱{{ INSTRUCTOR_FEE }})</span>
+              </label>
+            </div>
+
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-4">
               <div>
-                <label for="tx-amount" class="block text-[11px] sm:text-sm text-mist mb-1">Amount (₱) *</label>
-                <input id="tx-amount" v-model.number="txForm.amount" type="number" min="1" step="1" class="input-field" placeholder="Amount charged" />
+                <label for="tx-paid" class="block text-[11px] sm:text-sm text-mist mb-1">Amount Paid (₱) *</label>
+                <input id="tx-paid" v-model.number="txForm.paidAmount" type="number" min="1" step="1" class="input-field" placeholder="Amount actually paid" />
+                <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">
+                  Default total: ₱{{ txSuggestedAmount.toLocaleString() }} (plan ₱{{ txPlanPrice.toLocaleString() }} + fees ₱{{ txFeeTotal.toLocaleString() }})
+                </p>
               </div>
               <div>
                 <label for="tx-method" class="block text-[11px] sm:text-sm text-mist mb-1">Payment Method *</label>
@@ -1920,6 +2536,16 @@ onMounted(async () => {
                   <option v-for="coach in coachesList" :key="coach.id" :value="coach.fullName">{{ coach.fullName }}</option>
                 </select>
               </div>
+            </div>
+
+            <div
+              class="mb-4 border px-3 py-2 text-[11px] sm:text-xs"
+              :class="txPaymentStatus === 'Full' ? 'border-green-400/30 bg-green-400/5' : 'border-orange-400/30 bg-orange-400/5'"
+            >
+              <span class="font-medium" :class="txPaymentStatus === 'Full' ? 'text-green-400' : 'text-orange-400'">{{ txPaymentStatus }}</span>
+              <span class="text-mist"> — ₱{{ txPaidValue.toLocaleString() }} of ₱{{ txAmountValue.toLocaleString() }}</span>
+              <span v-if="txPaymentStatus === 'Partial'" class="text-mist"> (₱{{ txBalance.toLocaleString() }} balance)</span>
+              <span v-else-if="txChange > 0" class="text-yellow-400"> (₱{{ txChange.toLocaleString() }} change)</span>
             </div>
 
             <div class="mb-4">
@@ -1981,56 +2607,23 @@ onMounted(async () => {
               </button>
             </div>
 
-            <!-- Filters -->
-            <div class="flex gap-1.5 sm:gap-2 mb-4 sm:mb-6 flex-wrap">
-              <button
-                type="button"
-                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
-                :class="paymentsStatusFilter === '' ? 'border-gold text-gold bg-gold/10' : 'border-iron text-mist hover:border-gold/50'"
-                @click="paymentsStatusFilter = ''; loadPayments()"
-              >
-                All
-              </button>
-              <button
-                type="button"
-                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
-                :class="paymentsStatusFilter === 'pending' ? 'border-yellow-400 text-yellow-400 bg-yellow-400/10' : 'border-iron text-mist hover:border-yellow-400/50'"
-                @click="paymentsStatusFilter = 'pending'; loadPayments()"
-              >
-                Pending
-              </button>
-              <button
-                type="button"
-                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
-                :class="paymentsStatusFilter === 'partial' ? 'border-orange-400 text-orange-400 bg-orange-400/10' : 'border-iron text-mist hover:border-orange-400/50'"
-                @click="paymentsStatusFilter = 'partial'; loadPayments()"
-              >
-                Partial
-              </button>
-              <button
-                type="button"
-                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
-                :class="paymentsStatusFilter === 'approved' ? 'border-green-400 text-green-400 bg-green-400/10' : 'border-iron text-mist hover:border-green-400/50'"
-                @click="paymentsStatusFilter = 'approved'; loadPayments()"
-              >
-                Approved
-              </button>
-              <button
-                type="button"
-                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
-                :class="paymentsStatusFilter === 'rejected' ? 'border-red-400 text-red-400 bg-red-400/10' : 'border-iron text-mist hover:border-red-400/50'"
-                @click="paymentsStatusFilter = 'rejected'; loadPayments()"
-              >
-                Rejected
-              </button>
-              <button
-                type="button"
-                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
-                :class="paymentsStatusFilter === 'history' ? 'border-purple-400 text-purple-400 bg-purple-400/10' : 'border-iron text-mist hover:border-purple-400/50'"
-                @click="paymentsStatusFilter = 'history'; loadPayments()"
-              >
-                History
-              </button>
+            <!-- Status counts -->
+            <div v-if="paymentsSummary" class="flex flex-wrap gap-1.5 sm:gap-2 mb-4 sm:mb-6">
+              <span class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border border-yellow-400/30 text-yellow-400 bg-yellow-400/5">
+                Pending {{ paymentsSummary.pending }}
+              </span>
+              <span class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border border-orange-400/30 text-orange-400 bg-orange-400/5">
+                Partial {{ paymentsSummary.partial }}
+              </span>
+              <span class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border border-green-400/30 text-green-400 bg-green-400/5">
+                Approved {{ paymentsSummary.approved }}
+              </span>
+              <span class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border border-red-400/30 text-red-400 bg-red-400/5">
+                Rejected {{ paymentsSummary.rejected }}
+              </span>
+              <span class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border border-purple-400/30 text-purple-400 bg-purple-400/5">
+                History {{ paymentsSummary.history }}
+              </span>
             </div>
 
             <div v-if="paymentsLoading" class="text-center py-12">
@@ -2079,7 +2672,23 @@ onMounted(async () => {
                       <span class="text-cream font-medium uppercase">{{ payment.plan }}</span>
                     </div>
                     <div class="flex justify-between items-baseline text-[11px] sm:text-xs">
-                      <span class="text-mist">Amount</span>
+                      <span class="text-mist">Customer Type</span>
+                      <span class="text-cream font-medium">{{ payment.customerType === 'non_member' ? 'Non-member' : 'Member' }}</span>
+                    </div>
+                    <div v-if="payment.planPrice != null" class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                      <span class="text-mist">Plan Price</span>
+                      <span class="text-cream font-medium">₱{{ payment.planPrice.toLocaleString() }}</span>
+                    </div>
+                    <div v-if="payment.membershipFee > 0" class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                      <span class="text-mist">Membership Fee</span>
+                      <span class="text-cream font-medium">₱{{ payment.membershipFee.toLocaleString() }}</span>
+                    </div>
+                    <div v-if="payment.instructorFee > 0" class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                      <span class="text-mist">Instructor Fee</span>
+                      <span class="text-cream font-medium">₱{{ payment.instructorFee.toLocaleString() }}</span>
+                    </div>
+                    <div class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                      <span class="text-mist">Amount Due</span>
                       <span class="text-gold font-display text-base sm:text-lg">₱{{ payment.amount.toLocaleString() }}</span>
                     </div>
                     <template v-if="payment.paidAmount != null && payment.status !== 'pending'">
@@ -2087,7 +2696,11 @@ onMounted(async () => {
                         <span class="text-mist">Amount Paid</span>
                         <span class="text-green-400 font-medium">₱{{ payment.paidAmount.toLocaleString() }}</span>
                       </div>
-                      <div class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                      <div v-if="payment.paidAmount < payment.amount" class="flex justify-between items-baseline text-[11px] sm:text-xs">
+                        <span class="text-mist">Balance</span>
+                        <span class="text-orange-400 font-medium">₱{{ (payment.amount - payment.paidAmount).toLocaleString() }}</span>
+                      </div>
+                      <div v-else class="flex justify-between items-baseline text-[11px] sm:text-xs">
                         <span class="text-mist">Change</span>
                         <span :class="payment.paidAmount > payment.amount ? 'text-yellow-400 font-medium' : 'text-cream'">₱{{ Math.max(0, payment.paidAmount - payment.amount).toLocaleString() }}</span>
                       </div>

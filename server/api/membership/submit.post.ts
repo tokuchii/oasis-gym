@@ -1,5 +1,6 @@
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { validateMembershipPayload, checkRateLimit } from '~/server/utils/walkin'
+import { getPlanDays, getPlanRate, type MembershipPlanId } from '~/types/walkin'
 
 export default defineEventHandler(async (event) => {
   const ip = getRequestHeader(event, 'x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
@@ -49,7 +50,7 @@ export default defineEventHandler(async (event) => {
 
   const now = new Date()
   const expiryDate = new Date(now)
-  expiryDate.setFullYear(expiryDate.getFullYear() + 1)
+  expiryDate.setDate(expiryDate.getDate() + getPlanDays(payload.plan as MembershipPlanId))
   const expiryDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(expiryDate)
 
   const supabase = useSupabaseAdmin()
@@ -76,6 +77,8 @@ export default defineEventHandler(async (event) => {
       email: payload.email,
       phone: payload.phone,
       plan: payload.plan,
+      customer_type: payload.customerType,
+      plan_price: getPlanRate(payload.plan as MembershipPlanId, payload.customerType as 'member' | 'non_member'),
       coach,
       payment_method: payload.paymentMethod,
       reference_no: payload.referenceNo || null,

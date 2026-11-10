@@ -1,7 +1,6 @@
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
-
-const SESSION_LIMITS: Record<string, number> = { weekly: 4, monthly: 13 }
+import { getPlanDays, getPlanSessions, type MembershipPlanId } from '~/types/walkin'
 
 export default defineEventHandler(async (event) => {
   requireStaff(event)
@@ -29,12 +28,12 @@ export default defineEventHandler(async (event) => {
     for (const payment of approvedPayments) {
       if (existingEmails.has(payment.email)) continue
 
-      const totalSessions = SESSION_LIMITS[payment.plan] ?? 4
-      const now = new Date()
-      const startDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(now)
-      const endDate = new Date(now)
-      endDate.setFullYear(endDate.getFullYear() + 1)
-      const endDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(endDate)
+      const totalSessions = getPlanSessions(payment.plan as MembershipPlanId)
+      const startDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date())
+      const endDate = new Date(`${startDate}T00:00:00`)
+      endDate.setDate(endDate.getDate() + getPlanDays(payment.plan as MembershipPlanId))
+      const endDateStr = payment.expiry_date
+        ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(endDate)
 
       await supabase.from('client_sessions').insert({
         client_name: payment.full_name,
@@ -42,13 +41,15 @@ export default defineEventHandler(async (event) => {
         client_phone: payment.phone,
         coach_name: payment.coach || null,
         plan: payment.plan,
+        customer_type: payment.customer_type ?? 'member',
+        payment_id: payment.id,
         total_sessions: totalSessions,
         sessions_used: 0,
         start_date: startDate,
         end_date: endDateStr,
         status: 'active',
         note: `Synced from membership (${payment.plan} plan)`,
-        paid_amount: payment.amount,
+        paid_amount: payment.paid_amount ?? payment.amount,
       })
       existingEmails.add(payment.email)
     }

@@ -1,6 +1,17 @@
 import nodemailer from 'nodemailer'
+import { getPlanDays, type MembershipPlanId } from '~/types/walkin'
 
 let transporter: nodemailer.Transporter | null = null
+
+const PLAN_LABELS: Record<string, string> = {
+  daily: 'Daily',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+}
+
+function getPlanLabel(plan: string): string {
+  return PLAN_LABELS[plan] ?? 'Daily'
+}
 
 function getTransporter() {
   const config = useRuntimeConfig()
@@ -98,12 +109,13 @@ export async function sendCertificationEmail(params: {
   to: string
   fullName: string
   plan: string
+  expiryDate?: string
 }) {
-  const planLabel = params.plan === 'weekly' ? 'Weekly' : 'Monthly'
+  const planLabel = getPlanLabel(params.plan)
   const expiryDate = new Date()
-  expiryDate.setFullYear(expiryDate.getFullYear() + 1)
+  expiryDate.setDate(expiryDate.getDate() + getPlanDays(params.plan as MembershipPlanId))
 
-  const expiryStr = expiryDate.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
+  const expiryStr = params.expiryDate ?? expiryDate.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
 
   return sendEmail(
     params.to,
@@ -136,7 +148,7 @@ export async function sendMembershipApprovedEmail(params: {
   plan: string
   expiryDate: string
 }) {
-  const planLabel = params.plan === 'weekly' ? 'Weekly' : 'Monthly'
+  const planLabel = getPlanLabel(params.plan)
 
   return sendEmail(
     params.to,
@@ -169,7 +181,7 @@ export async function sendMembershipRejectedEmail(params: {
   fullName: string
   plan: string
 }) {
-  const planLabel = params.plan === 'weekly' ? 'Weekly' : 'Monthly'
+  const planLabel = getPlanLabel(params.plan)
 
   return sendEmail(
     params.to,
@@ -202,7 +214,7 @@ export async function sendRenewalReminder(params: {
   plan: string
   expiryDate: string
 }) {
-  const planLabel = params.plan === 'weekly' ? 'Weekly' : 'Monthly'
+  const planLabel = getPlanLabel(params.plan)
 
   return sendEmail(
     params.to,

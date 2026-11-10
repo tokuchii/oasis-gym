@@ -18,6 +18,8 @@
     "@capacitor/ios": "^8.4.1",
     "@supabase/supabase-js": "^2.49.1",
     "gsap": "^3.12.7",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.9",
     "nodemailer": "^9.0.1",
     "nuxt": "^3.16.0",
     "tesseract.js": "^7.0.0",

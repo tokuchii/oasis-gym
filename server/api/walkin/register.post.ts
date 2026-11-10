@@ -74,6 +74,7 @@ export default defineEventHandler(async (event) => {
         email: payload.email,
         emergency_contact: payload.emergencyContact,
         member_status: payload.memberStatus,
+        customer_type: payload.customerType,
         removed: false,
       })
       .eq('id', existing.id)
@@ -107,6 +108,7 @@ export default defineEventHandler(async (event) => {
         visit_date: visitDate,
         status: 'registered',
         member_status: payload.memberStatus,
+        customer_type: payload.customerType,
       })
       .select('*')
       .single()
