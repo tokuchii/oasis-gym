@@ -1,3 +1,4 @@
+import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { createPaidSession } from '~/server/utils/sessions'
@@ -141,6 +142,19 @@ export default defineEventHandler(async (event) => {
   const paymentMessage = status === 'partial'
     ? `${fullName}'s ${plan} payment recorded as PARTIAL. ₱${paidAmount.toLocaleString()} of ₱${amount.toLocaleString()} paid — ₱${balance.toLocaleString()} balance. Expires ${expiryDate}.`
     : `${fullName}'s ${plan} payment of ₱${paidAmount.toLocaleString()} recorded. ${change > 0 ? `₱${change.toLocaleString()} change. ` : ''}Expires ${expiryDate}.`
+
+  await logActivity(supabase, {
+    category: 'payment',
+    action: status === 'partial' ? 'partial_payment_recorded' : 'payment_recorded',
+    title: status === 'partial' ? 'Partial payment recorded' : 'Payment recorded',
+    description: `${fullName} · ${plan} plan · ₱${paidAmount.toLocaleString()} paid${balance > 0 ? ` · ₱${balance.toLocaleString()} balance` : ''} · expires ${expiryDate}`,
+    clientName: fullName,
+    clientPhone: phone,
+    clientEmail: emailRaw || null,
+    amount: paidAmount,
+    reference: payment.id,
+    metadata: { plan, customerType, amount, paidAmount, balance, status, expiryDate },
+  })
 
   return {
     message: paymentMessage,

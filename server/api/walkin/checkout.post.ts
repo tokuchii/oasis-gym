@@ -1,4 +1,5 @@
 import type { ClientSession, CustomerType, MembershipPlanId } from '~/types/walkin'
+import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { isValidPassCodeFormat, normalizePassCode } from '~/server/utils/pass-code'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
@@ -189,6 +190,31 @@ export default defineEventHandler(async (event) => {
       ? `Guest checked out successfully. ${sessionsRemaining} session(s) remaining on their ${memberStatus} plan.`
       : `Guest checked out successfully. This completes their ${memberStatus} plan — renewal needed.`
   }
+
+  const sessionSummary = sessionsUsed != null && totalSessions != null
+    ? ` · ${sessionsUsed}/${totalSessions} sessions${sessionsRemaining != null ? ` (${sessionsRemaining} left)` : ''}`
+    : ''
+
+  await logActivity(supabase, {
+    category: 'checkout',
+    action: 'session_checkout',
+    title: 'Session checked out',
+    description: `${updated.full_name} checked out${sessionSummary}`,
+    clientName: updated.full_name,
+    clientPhone: updated.phone,
+    clientEmail: updated.email,
+    amount: paymentAmount,
+    reference: passCode,
+    metadata: sessionsUsed != null && totalSessions != null
+      ? {
+          plan: session?.plan ?? plan,
+          memberStatus,
+          sessionsUsed,
+          totalSessions,
+          sessionsRemaining: sessionsRemaining ?? 0,
+        }
+      : { memberStatus },
+  })
 
   return {
     pass: serializePass(updated),

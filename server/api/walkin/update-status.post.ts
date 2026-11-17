@@ -1,3 +1,4 @@
+import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { CUSTOMER_TYPE_IDS, MEMBER_STATUS_IDS, serializePass } from '~/server/utils/walkin'
@@ -48,6 +49,22 @@ export default defineEventHandler(async (event) => {
   if (!data) {
     throw createError({ statusCode: 404, statusMessage: 'Member not found.' })
   }
+
+  const changes: string[] = []
+  if (memberStatus) changes.push(`membership ${memberStatus}`)
+  if (customerType) changes.push(`type ${customerType === 'member' ? 'member' : 'non-member'}`)
+
+  await logActivity(supabase, {
+    category: 'update',
+    action: 'member_updated',
+    title: 'Member updated',
+    description: `${data.full_name}${changes.length ? ` · ${changes.join(', ')}` : ''}`,
+    clientName: data.full_name,
+    clientPhone: data.phone,
+    clientEmail: data.email,
+    reference: memberId,
+    metadata: { memberStatus: data.member_status, customerType: data.customer_type },
+  })
 
   return {
     pass: serializePass(data),

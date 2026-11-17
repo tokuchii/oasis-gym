@@ -1,3 +1,4 @@
+import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 
@@ -15,7 +16,7 @@ export default defineEventHandler(async (event) => {
 
   const { data: member, error: fetchError } = await supabase
     .from('walkin_passes')
-    .select('id, full_name, removed')
+    .select('id, full_name, phone, email, removed')
     .eq('id', memberId)
     .maybeSingle()
 
@@ -41,6 +42,17 @@ export default defineEventHandler(async (event) => {
     console.error('[Walkin] Remove error:', error)
     throw createError({ statusCode: 500, statusMessage: 'Failed to remove member. Please try again.' })
   }
+
+  await logActivity(supabase, {
+    category: 'delete',
+    action: 'member_removed',
+    title: 'Member removed',
+    description: `${member.full_name} moved to history`,
+    clientName: member.full_name,
+    clientPhone: member.phone,
+    clientEmail: member.email,
+    reference: memberId,
+  })
 
   return { message: `${member.full_name} removed. Visit history is kept.` }
 })

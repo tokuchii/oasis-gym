@@ -1,3 +1,4 @@
+import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 
@@ -57,6 +58,25 @@ export default defineEventHandler(async (event) => {
   }
 
   const fullyPaid = remaining <= 0
+
+  await logActivity(supabase, {
+    category: 'payment',
+    action: 'partial_payment_added',
+    title: 'Partial payment added',
+    description: `${existing.full_name} · ${existing.plan} plan · ₱${addAmount.toLocaleString()} added · ₱${newTotal.toLocaleString()} of ₱${existing.amount.toLocaleString()} paid`,
+    clientName: existing.full_name,
+    clientPhone: existing.phone,
+    clientEmail: existing.email,
+    amount: addAmount,
+    reference: id,
+    metadata: {
+      plan: existing.plan,
+      amountAdded: addAmount,
+      totalPaid: newTotal,
+      expectedAmount: existing.amount,
+      fullyPaid,
+    },
+  })
 
   return {
     message: overpayment > 0

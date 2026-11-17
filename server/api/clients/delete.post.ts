@@ -1,3 +1,4 @@
+import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 
@@ -32,6 +33,17 @@ export default defineEventHandler(async (event) => {
     console.error('[Clients] Delete error:', error)
     throw createError({ statusCode: 500, statusMessage: 'Failed to remove client. Please try again.' })
   }
+
+  await logActivity(supabase, {
+    category: 'delete',
+    action: 'client_removed',
+    title: 'Client removed',
+    description: `${client.client_name} moved to history`,
+    clientName: client.client_name,
+    clientPhone: client.client_phone,
+    clientEmail: client.client_email,
+    reference: clientId,
+  })
 
   return { message: `${client.client_name} moved to history.` }
 })

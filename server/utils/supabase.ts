@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { WalkinPass, MembershipPayment, Coach, ClientSession, SessionUsage } from '~/types/walkin'
+import type { WalkinPass, MembershipPayment, Coach, ClientSession, SessionUsage, ActivityLog } from '~/types/walkin'
 
 export type GymDatabase = {
   public: {
@@ -53,6 +53,15 @@ export type GymDatabase = {
           created_at?: string
         }
         Update: Partial<Coach>
+        Relationships: []
+      }
+      activity_logs: {
+        Row: ActivityLog
+        Insert: Omit<ActivityLog, 'id' | 'created_at'> & {
+          id?: string
+          created_at?: string
+        }
+        Update: Partial<ActivityLog>
         Relationships: []
       }
     }

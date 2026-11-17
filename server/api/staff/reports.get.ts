@@ -1,6 +1,7 @@
 import { getPlanSessions, type ClientSession, type SessionUsage, type WalkinPass } from '~/types/walkin'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
+import { clientIdentityKey } from '~/server/utils/sessions'
 import { getVisitDateManila } from '~/server/utils/walkin'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -93,18 +94,47 @@ export default defineEventHandler(async (event) => {
     console.error('[Reports] Membership payment error:', payError)
   }
 
-  const serialized = ((passes ?? []) as WalkinPass[]).map((p) => ({
-    id: p.id,
-    passCode: p.pass_code,
-    fullName: p.full_name,
-    phone: p.phone,
-    email: p.email,
-    visitDate: p.visit_date,
-    status: p.status,
-    paymentAmount: p.payment_amount && p.payment_amount > 0 ? p.payment_amount : null,
-    createdAt: p.created_at,
-    checkedInAt: p.checked_in_at,
-  }))
+  const planSessionRows = ((sessionRows ?? []) as ClientSession[]).filter(
+    (session) => session.plan === 'weekly' || session.plan === 'monthly',
+  )
+  const sessionTotalFor = (session: ClientSession) => getPlanSessions(session.plan)
+  const sessionUsable = (session: ClientSession) => session.end_date >= today
+    && session.sessions_used < sessionTotalFor(session)
+    && (session.status === 'active' || session.status === 'completed')
+
+  const sessionByIdentity = new Map<string, ClientSession>()
+  for (const session of planSessionRows) {
+    const key = clientIdentityKey(session.client_name, session.client_phone, session.client_email)
+    const current = sessionByIdentity.get(key)
+    if (!current || (!sessionUsable(current) && sessionUsable(session))) {
+      sessionByIdentity.set(key, session)
+    }
+  }
+
+  const serialized = ((passes ?? []) as WalkinPass[]).map((p) => {
+    const session = sessionByIdentity.get(clientIdentityKey(p.full_name, p.phone, p.email))
+    const totalSessions = session ? sessionTotalFor(session) : 0
+    return {
+      id: p.id,
+      passCode: p.pass_code,
+      fullName: p.full_name,
+      phone: p.phone,
+      email: p.email,
+      visitDate: p.visit_date,
+      status: p.status,
+      paymentAmount: p.payment_amount && p.payment_amount > 0 ? p.payment_amount : null,
+      createdAt: p.created_at,
+      checkedInAt: p.checked_in_at,
+      session: session
+        ? {
+            plan: session.plan,
+            totalSessions,
+            sessionsUsed: session.sessions_used,
+            sessionsRemaining: Math.max(0, totalSessions - session.sessions_used),
+          }
+        : null,
+    }
+  })
 
   const membershipPayments = ((payments ?? []) as { id: string; full_name: string; email: string; phone: string; plan: string; amount: number; paid_amount: number | null; status: string; created_at: string }[]).map((r) => ({
     id: r.id,
@@ -127,9 +157,7 @@ export default defineEventHandler(async (event) => {
   const totalRevenue = walkinRevenue + membershipRevenue
   const uniquePhones = new Set(serialized.map((p) => p.phone)).size
 
-  const sessions = ((sessionRows ?? []) as ClientSession[]).filter(
-    (session) => session.plan === 'weekly' || session.plan === 'monthly',
-  )
+  const sessions = planSessionRows
   const usage = ((usageRows ?? []) as SessionUsage[]).filter((row) => row.plan !== 'daily')
   const totalFor = (session: ClientSession) => getPlanSessions(session.plan)
   const activeSessions = sessions.filter(

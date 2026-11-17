@@ -1,4 +1,5 @@
 import { generatePassCode } from '~/server/utils/pass-code'
+import { logActivity } from '~/server/utils/activity'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { ensureRegistrationSession } from '~/server/utils/sessions'
 import { checkRateLimit, getVisitDateManila, serializePass, validateWalkinPayload } from '~/server/utils/walkin'
@@ -70,6 +71,18 @@ export default defineEventHandler(async (event) => {
 
     await startPlanSession(restored)
 
+    await logActivity(supabase, {
+      category: 'register',
+      action: 'member_restored',
+      title: 'Returning member restored',
+      description: `${restored.full_name} restored · ${restored.member_status} plan`,
+      clientName: restored.full_name,
+      clientPhone: restored.phone,
+      clientEmail: restored.email,
+      reference: restored.pass_code,
+      metadata: { memberStatus: restored.member_status, customerType: restored.customer_type },
+    })
+
     return {
       ...serializePass(restored),
       restored: true,
@@ -116,6 +129,18 @@ export default defineEventHandler(async (event) => {
   }
 
   await startPlanSession(inserted)
+
+  await logActivity(supabase, {
+    category: 'register',
+    action: 'member_registered',
+    title: 'New member registered',
+    description: `${inserted.full_name} · ${inserted.member_status} plan`,
+    clientName: inserted.full_name,
+    clientPhone: inserted.phone,
+    clientEmail: inserted.email,
+    reference: inserted.pass_code,
+    metadata: { memberStatus: inserted.member_status, customerType: inserted.customer_type },
+  })
 
   const pass = serializePass(inserted)
 

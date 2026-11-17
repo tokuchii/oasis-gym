@@ -1,4 +1,5 @@
 import { getPlanSessions, type ClientSession } from '~/types/walkin'
+import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { sendSessionLowReminder } from '~/server/utils/email'
@@ -55,6 +56,16 @@ export default defineEventHandler(async (event) => {
       errors.push({ email: session.client_email, error: errMsg })
       console.error(`[Session Reminders] Failed to send to ${session.client_email}:`, errMsg)
     }
+  }
+
+  if (sent > 0) {
+    await logActivity(supabase, {
+      category: 'reminder',
+      action: 'session_reminders_sent',
+      title: 'Session reminders sent',
+      description: `Sent ${sent} low-session reminder(s)${failed > 0 ? ` · ${failed} failed` : ''}`,
+      metadata: { sent, failed, total: candidates.length },
+    })
   }
 
   return {

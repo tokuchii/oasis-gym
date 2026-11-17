@@ -201,3 +201,28 @@ set status = 'active',
 where status = 'completed'
   and sessions_used < total_sessions
   and end_date >= (timezone('Asia/Manila', now()))::date;
+
+-- ---------------------------------------------------------------------------
+-- Activity log (all staff actions across the system)
+-- ---------------------------------------------------------------------------
+create table if not exists activity_logs (
+  id                uuid primary key default gen_random_uuid(),
+  category          text not null,
+  action            text not null,
+  title             text not null,
+  description       text,
+  client_name       text,
+  client_phone      text,
+  client_email      text,
+  amount            numeric,
+  reference         text,
+  metadata          jsonb,
+  staff             text not null default 'staff',
+  created_at        timestamptz not null default now()
+);
+
+create index if not exists activity_logs_created_at_idx on activity_logs (created_at desc);
+create index if not exists activity_logs_category_idx on activity_logs (category);
+create index if not exists activity_logs_client_email_idx on activity_logs (client_email);
+
+alter table activity_logs enable row level security;

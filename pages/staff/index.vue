@@ -7,6 +7,7 @@ import {
   PLAN_RATES,
   clientDefaultRate,
   clientTypeLabel,
+  type ActivityCategory,
   type CustomerType,
   type MemberStatus,
   type MembershipPlanId,
@@ -74,6 +75,12 @@ interface ReportVisit {
   paymentAmount: number | null
   createdAt: string
   checkedInAt: string | null
+  session: {
+    plan: MembershipPlanId
+    totalSessions: number
+    sessionsUsed: number
+    sessionsRemaining: number
+  } | null
 }
 
 interface ReportSummary {
@@ -172,6 +179,8 @@ const membersFilter = ref('')
 const membersSortAsc = ref(true)
 const membersLimit = ref(5)
 const membersStatusFilter = ref('all')
+const membersIncludeCheckedIn = ref(false)
+const membersRequestId = ref(0)
 const memberRemoving = ref('')
 const memberConfirmRemove = ref('')
 const memberStatusUpdating = ref('')
@@ -272,6 +281,119 @@ const exportFrom = ref('')
 const exportTo = ref('')
 const exportLoading = ref(false)
 const exportError = ref('')
+
+interface ActivityItem {
+  id: string
+  category: ActivityCategory
+  action: string
+  title: string
+  description: string | null
+  clientName: string | null
+  clientPhone: string | null
+  clientEmail: string | null
+  amount: number | null
+  reference: string | null
+  metadata: Record<string, string | number | boolean | null> | null
+  staff: string
+  createdAt: string
+}
+
+const ACTIVITY_FILTERS: { id: ActivityCategory | 'all'; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'register', label: 'Register' },
+  { id: 'checkout', label: 'Checkout' },
+  { id: 'payment', label: 'Payment' },
+  { id: 'update', label: 'Change' },
+  { id: 'delete', label: 'Delete' },
+  { id: 'reminder', label: 'Reminder' },
+]
+
+const activities = ref<ActivityItem[]>([])
+const activitiesLoading = ref(false)
+const activitiesError = ref('')
+const showActivityModal = ref(false)
+const activityFilter = ref<ActivityCategory | 'all'>('all')
+const activitySearch = ref('')
+
+const activityCounts = computed(() => {
+  const counts: Record<string, number> = { all: activities.value.length }
+  for (const option of ACTIVITY_FILTERS) {
+    if (option.id !== 'all') {
+      counts[option.id] = activities.value.filter((activity) => activity.category === option.id).length
+    }
+  }
+  return counts
+})
+
+const filteredActivities = computed(() => {
+  const query = activitySearch.value.trim().toLowerCase()
+  return activities.value.filter((activity) => {
+    if (activityFilter.value !== 'all' && activity.category !== activityFilter.value) return false
+    if (!query) return true
+    return [
+      activity.title,
+      activity.description,
+      activity.clientName,
+      activity.clientPhone,
+      activity.clientEmail,
+      activity.reference,
+    ].some((value) => (value ?? '').toLowerCase().includes(query))
+  })
+})
+
+async function loadActivities() {
+  activitiesError.value = ''
+  activitiesLoading.value = true
+  try {
+    const data = await cachedGet<{ activities: ActivityItem[]; error?: string }>('/api/staff/activity', {
+      cache: { store: 'activity', label: 'Activity log' },
+    })
+    activities.value = data.activities ?? []
+    if (data.error) activitiesError.value = data.error
+  } catch (err: unknown) {
+    const fetchErr = err as { statusCode?: number; statusMessage?: string; data?: { statusMessage?: string }; message?: string }
+    const message = fetchErr.data?.statusMessage ?? fetchErr.statusMessage
+    if (message) {
+      activitiesError.value = message
+    } else if (fetchErr.statusCode === 404 || /not valid json|unexpected token|<!doctype html/i.test(fetchErr.message ?? '')) {
+      activitiesError.value = 'Activity Log API is not available on this server yet. Redeploy the app to enable it.'
+    } else {
+      activitiesError.value = 'Failed to load activity log.'
+    }
+  } finally {
+    activitiesLoading.value = false
+  }
+}
+
+function openActivityModal() {
+  showActivityModal.value = true
+  activityFilter.value = 'all'
+  activitySearch.value = ''
+  loadActivities()
+}
+
+function activityCategoryLabel(category: string): string {
+  return ACTIVITY_FILTERS.find((option) => option.id === category)?.label ?? category
+}
+
+function activityCategoryClass(category: string): string {
+  if (category === 'payment') return 'border-gold/40 text-gold bg-gold/5'
+  if (category === 'checkout') return 'border-green-400/40 text-green-400 bg-green-400/5'
+  if (category === 'delete') return 'border-red-400/40 text-red-400 bg-red-400/5'
+  if (category === 'register') return 'border-sky-400/40 text-sky-300 bg-sky-400/5'
+  if (category === 'reminder') return 'border-orange-400/40 text-orange-400 bg-orange-400/5'
+  return 'border-iron text-mist'
+}
+
+function activityDateTime(iso: string): string {
+  return new Intl.DateTimeFormat('en-PH', {
+    timeZone: 'Asia/Manila',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(iso))
+}
 
 const sortedVisits = computed(() => {
   if (!reportData.value) return []
@@ -433,11 +555,15 @@ function resetState() {
   checkinError.value = ''
   walkinMessage.value = ''
   walkinPassCode.value = ''
+  activities.value = []
+  activitiesError.value = ''
+  showActivityModal.value = false
 }
 
 function closeTransactionModals() {
   selectedPass.value = null
   showExportModal.value = false
+  showActivityModal.value = false
   receiptModalUrl.value = ''
   receiptModalName.value = ''
   receiptModalLoading.value = false
@@ -518,21 +644,24 @@ async function submitWalkin() {
 }
 
 async function loadMembers() {
-  if (membersLoading.value) return
+  const requestId = ++membersRequestId.value
   membersLoading.value = true
   membersError.value = ''
   membersLimit.value = 5
   try {
-    const data = await cachedGet<{ members: PassResult[] }>('/api/walkin/list', {
+    const path = membersIncludeCheckedIn.value ? '/api/walkin/list?all=1' : '/api/walkin/list'
+    const data = await cachedGet<{ members: PassResult[] }>(path, {
       cache: { store: 'passes', label: 'Walk-in members' },
     })
+    if (requestId !== membersRequestId.value) return
     membersList.value = data.members
   } catch (err: unknown) {
+    if (requestId !== membersRequestId.value) return
     const fetchErr = err as { data?: { statusMessage?: string } }
     membersError.value = fetchErr.data?.statusMessage ?? (err instanceof Error ? err.message : 'Failed to load members.')
     membersList.value = []
   } finally {
-    membersLoading.value = false
+    if (requestId === membersRequestId.value) membersLoading.value = false
   }
 }
 
@@ -544,6 +673,10 @@ function resetTabState(tab: StaffTab) {
     reminderError.value = ''
     visitLogLimit.value = 5
     showAllCoaches.value = false
+    showActivityModal.value = false
+    activityFilter.value = 'all'
+    activitySearch.value = ''
+    activitiesError.value = ''
   } else if (tab === 'checkout') {
     selectedPass.value = null
     checkinMessage.value = ''
@@ -566,6 +699,11 @@ function resetTabState(tab: StaffTab) {
     walkinMessage.value = ''
     walkinPassCode.value = ''
     walkinFormHoneypot.value = ''
+    membersFilter.value = ''
+    membersSortAsc.value = true
+    membersLimit.value = 5
+    membersError.value = ''
+    memberConfirmRemove.value = ''
   } else if (tab === 'payment') {
     clearTxMember()
     txForm.plan = 'monthly'
@@ -600,9 +738,16 @@ function resetTabState(tab: StaffTab) {
 watch(activeTab, (tab, prevTab) => {
   if (prevTab) resetTabState(prevTab)
 
-  if (tab === 'reports') loadReports()
-  else if (tab === 'checkout') loadMembers()
-  else if (tab === 'payment') initPaymentTab()
+  if (tab === 'reports') {
+    loadReports()
+    loadActivities()
+  } else if (tab === 'checkout') {
+    membersIncludeCheckedIn.value = false
+    loadMembers()
+  } else if (tab === 'walkin') {
+    membersIncludeCheckedIn.value = true
+    loadMembers()
+  } else if (tab === 'payment') initPaymentTab()
   else if (tab === 'coaches') loadCoaches()
 })
 
@@ -2162,59 +2307,171 @@ onMounted(async () => {
               </div>
 
               <div class="border border-iron bg-graphite/30">
-                <div class="flex items-center justify-between gap-2 px-4 py-3 border-b border-iron">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 border-b border-iron">
                   <div>
-                    <h3 class="font-display text-base sm:text-lg text-cream tracking-wide">Visit Log</h3>
-                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">{{ sortedVisits.length }} total entries</p>
+                    <h3 class="font-display text-base sm:text-lg text-cream tracking-wide">Activity Log</h3>
+                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">{{ activities.length }} recent activities</p>
                   </div>
-                  <span class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">{{ reportPeriodLabel }}</span>
+                  <button
+                    type="button"
+                    class="btn-outline text-[10px] sm:text-xs px-3 py-1.5 shrink-0"
+                    @click="openActivityModal"
+                  >
+                    View Activity
+                  </button>
                 </div>
-                <div v-if="sortedVisits.length > 0" class="overflow-x-auto">
-                  <table class="w-full text-[10px] sm:text-xs min-w-[560px]">
-                    <thead>
-                      <tr class="bg-obsidian/60 border-b border-iron">
-                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Date</th>
-                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Name</th>
-                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Pass Code</th>
-                        <th class="text-right p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Amount</th>
-                        <th class="text-right p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="v in sortedVisits.slice(0, visitLogLimit)" :key="v.id" class="border-b border-iron/40 last:border-0 hover:bg-obsidian/30 transition-colors">
-                        <td class="p-2.5 sm:p-3 whitespace-nowrap">
-                          <span class="text-cream">{{ v.visitDate }}</span>
-                          <span class="text-mist text-[9px] sm:text-[10px] ml-1.5">{{ timeLabel(v.checkedInAt || v.createdAt) }}</span>
-                        </td>
-                        <td class="p-2.5 sm:p-3 text-cream">{{ v.fullName }}</td>
-                        <td class="p-2.5 sm:p-3 text-gold font-display tracking-wider">{{ v.passCode }}</td>
-                        <td class="p-2.5 sm:p-3 text-cream text-right tabular-nums">{{ amountLabel(v.paymentAmount) }}</td>
-                        <td class="p-2.5 sm:p-3 text-right">
-                          <span class="inline-flex items-center px-2 py-0.5 text-[9px] sm:text-[10px] uppercase tracking-wider border" :class="statusBadgeClass(v.status)">
-                            {{ statusLabel(v.status) }}
-                          </span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+
+                <p v-if="activitiesError" class="text-red-400 text-xs sm:text-sm px-4 py-3">{{ activitiesError }}</p>
+                <div v-if="activitiesLoading && !activities.length" class="text-mist text-xs sm:text-sm text-center py-8">
+                  Loading activity…
                 </div>
-                <div v-else class="text-center py-10">
-                  <p class="text-mist text-xs sm:text-sm">No visits found for this period.</p>
+                <div v-else-if="!activities.length" class="text-center py-10">
+                  <p class="text-mist text-xs sm:text-sm">No activity recorded yet.</p>
                 </div>
-                <div v-if="sortedVisits.length > 0" class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 border-t border-iron">
-                  <p class="text-mist text-[9px] sm:text-[10px]">
-                    Showing {{ Math.min(visitLogLimit, sortedVisits.length) }} of {{ sortedVisits.length }} entries
-                  </p>
-                  <div class="flex gap-3">
-                    <button v-if="visitLogLimit > 5 && sortedVisits.length > 5" type="button" class="text-mist text-[10px] sm:text-[11px] uppercase tracking-wider hover:text-cream" @click="visitLogLimit = 5">
-                      Show Less
-                    </button>
-                    <button v-if="sortedVisits.length > visitLogLimit" type="button" class="text-gold text-[10px] sm:text-xs uppercase tracking-wider hover:underline" @click="visitLogLimit += 5">
-                      Show More ({{ sortedVisits.length - visitLogLimit }})
-                    </button>
-                  </div>
+                <ul v-else class="divide-y divide-iron/40">
+                  <li
+                    v-for="activity in activities.slice(0, 8)"
+                    :key="activity.id"
+                    class="flex items-start justify-between gap-3 px-4 py-3"
+                  >
+                    <div class="min-w-0">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span
+                          class="inline-flex items-center px-2 py-0.5 text-[8px] sm:text-[9px] uppercase tracking-wider border"
+                          :class="activityCategoryClass(activity.category)"
+                        >
+                          {{ activityCategoryLabel(activity.category) }}
+                        </span>
+                        <p class="text-cream text-xs sm:text-sm font-medium">{{ activity.title }}</p>
+                      </div>
+                      <p v-if="activity.description" class="text-mist text-[10px] sm:text-xs mt-0.5 break-words">{{ activity.description }}</p>
+                      <p v-if="activity.staff" class="text-mist/60 text-[9px] sm:text-[10px] mt-0.5">by {{ activity.staff }}</p>
+                    </div>
+                    <div class="shrink-0 text-right">
+                      <p class="text-mist text-[9px] sm:text-[10px] whitespace-nowrap">{{ activityDateTime(activity.createdAt) }}</p>
+                      <p v-if="activity.amount != null && activity.amount > 0" class="text-gold text-[10px] sm:text-xs tabular-nums mt-0.5">
+                        ₱{{ activity.amount.toLocaleString() }}
+                      </p>
+                    </div>
+                  </li>
+                </ul>
+                <div v-if="activities.length > 8" class="border-t border-iron px-4 py-2.5 text-center">
+                  <button type="button" class="text-gold text-[10px] sm:text-xs uppercase tracking-wider hover:underline" @click="openActivityModal">
+                    View all {{ activities.length }} activities
+                  </button>
                 </div>
               </div>
+
+              <!-- Activity Log Modal -->
+              <Teleport to="body">
+                <div
+                  v-if="showActivityModal"
+                  class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-onyx/90 backdrop-blur-sm"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Activity log"
+                  @click.self="showActivityModal = false"
+                >
+                  <div class="bg-graphite border border-iron rounded-sm max-w-2xl w-full max-h-[90vh] flex flex-col">
+                    <div class="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-iron shrink-0">
+                      <div>
+                        <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide">Activity Log</h2>
+                        <p class="text-mist text-[10px] sm:text-xs mt-0.5">
+                          {{ filteredActivities.length }} of {{ activities.length }} activities
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        class="text-mist hover:text-cream text-xl leading-none shrink-0"
+                        aria-label="Close"
+                        @click="showActivityModal = false"
+                      >
+                        &times;
+                      </button>
+                    </div>
+
+                    <div class="px-4 sm:px-6 py-3 border-b border-iron shrink-0 space-y-2">
+                      <input
+                        v-model="activitySearch"
+                        type="search"
+                        class="input-field"
+                        placeholder="Search name, activity, or reference…"
+                      />
+                      <div class="flex flex-wrap gap-1.5">
+                        <button
+                          v-for="option in ACTIVITY_FILTERS"
+                          :key="option.id"
+                          type="button"
+                          class="text-[9px] sm:text-[10px] uppercase tracking-wider px-2.5 py-1 border transition-colors"
+                          :class="activityFilter === option.id ? 'border-gold text-gold' : 'border-iron text-mist hover:text-cream'"
+                          @click="activityFilter = option.id"
+                        >
+                          {{ option.label }} ({{ activityCounts[option.id] }})
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-3">
+                      <p v-if="activitiesError" class="text-red-400 text-xs sm:text-sm mb-3">{{ activitiesError }}</p>
+                      <div v-if="activitiesLoading && !activities.length" class="text-mist text-sm text-center py-8">
+                        Loading activity…
+                      </div>
+                      <p v-else-if="!filteredActivities.length" class="text-mist text-sm text-center py-8">
+                        No activities match your filter.
+                      </p>
+                      <ul v-else class="divide-y divide-iron/40">
+                        <li
+                          v-for="activity in filteredActivities"
+                          :key="activity.id"
+                          class="flex items-start justify-between gap-3 py-3"
+                        >
+                          <div class="min-w-0">
+                            <div class="flex flex-wrap items-center gap-2">
+                              <span
+                                class="inline-flex items-center px-2 py-0.5 text-[8px] sm:text-[9px] uppercase tracking-wider border"
+                                :class="activityCategoryClass(activity.category)"
+                              >
+                                {{ activityCategoryLabel(activity.category) }}
+                              </span>
+                              <p class="text-cream text-xs sm:text-sm font-medium">{{ activity.title }}</p>
+                            </div>
+                            <p v-if="activity.description" class="text-mist text-[10px] sm:text-xs mt-0.5 break-words">{{ activity.description }}</p>
+                            <p v-if="activity.clientName || activity.reference" class="text-mist/60 text-[9px] sm:text-[10px] mt-0.5 break-words">
+                              <span v-if="activity.clientName">{{ activity.clientName }}</span>
+                              <span v-if="activity.reference"> · {{ activity.reference }}</span>
+                            </p>
+                            <p v-if="activity.staff" class="text-mist/60 text-[9px] sm:text-[10px] mt-0.5">by {{ activity.staff }}</p>
+                          </div>
+                          <div class="shrink-0 text-right">
+                            <p class="text-mist text-[9px] sm:text-[10px] whitespace-nowrap">{{ activityDateTime(activity.createdAt) }}</p>
+                            <p v-if="activity.amount != null && activity.amount > 0" class="text-gold text-[10px] sm:text-xs tabular-nums mt-0.5">
+                              ₱{{ activity.amount.toLocaleString() }}
+                            </p>
+                          </div>
+                        </li>
+                      </ul>
+                    </div>
+
+                    <div class="px-4 sm:px-6 py-3 border-t border-iron shrink-0 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        class="btn-outline text-[10px] sm:text-xs px-3 py-1.5"
+                        :disabled="activitiesLoading"
+                        @click="loadActivities()"
+                      >
+                        {{ activitiesLoading ? 'Refreshing…' : 'Refresh' }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-primary text-[10px] sm:text-xs px-3 py-1.5"
+                        @click="showActivityModal = false"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </Teleport>
             </template>
 
             <div v-else class="text-center py-10">
@@ -2718,6 +2975,91 @@ onMounted(async () => {
 
                 <button type="button" class="btn-outline w-full" @click="walkinPassCode = ''; walkinMessage = ''">
                   Register Another
+                </button>
+              </div>
+            </template>
+          </section>
+
+          <!-- Registered Members -->
+          <section class="card p-4 sm:p-6 mt-4 sm:mt-6">
+            <div class="flex items-center justify-between gap-3 mb-3 sm:mb-4">
+              <div>
+                <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide">Registered Members</h2>
+                <p class="text-mist text-[10px] sm:text-xs mt-0.5">Everyone registered in the system, including those checked out today. Remove a client to move them to history.</p>
+              </div>
+              <button
+                type="button"
+                class="btn-outline text-[10px] sm:text-xs px-3 py-1.5 shrink-0"
+                :disabled="membersLoading"
+                @click="loadMembers()"
+              >
+                {{ membersLoading ? 'Loading…' : 'Refresh' }}
+              </button>
+            </div>
+
+            <input
+              v-model="membersFilter"
+              type="search"
+              class="input-field"
+              placeholder="Filter by name or phone…"
+            />
+
+            <p v-if="membersError" class="text-red-400 text-xs sm:text-sm mt-2 sm:mt-3">{{ membersError }}</p>
+
+            <div v-if="membersLoading && !membersList.length" class="text-mist text-xs sm:text-sm text-center py-4">
+              Loading members…
+            </div>
+            <p v-else-if="!filteredMembers.length" class="text-mist text-xs sm:text-sm text-center py-4">
+              {{ membersFilter ? 'No members match your filter.' : 'No registered members yet.' }}
+            </p>
+            <template v-else>
+              <ul class="mt-3 sm:mt-4 space-y-1.5 sm:space-y-2 max-h-80 sm:max-h-96 overflow-y-auto">
+                <li
+                  v-for="member in filteredMembers.slice(0, membersLimit)"
+                  :key="member.id"
+                  class="border border-iron p-3 sm:p-4"
+                >
+                  <div class="flex items-center justify-between gap-3 sm:gap-4">
+                    <div class="min-w-0">
+                      <p class="text-cream font-medium text-sm sm:text-base truncate">{{ member.fullName }}</p>
+                      <p class="text-mist text-xs sm:text-sm truncate">{{ member.phone || 'No phone' }}</p>
+                      <p class="text-[10px] sm:text-xs uppercase tracking-wider mt-0.5" :class="clientTypeClass(member)">
+                        {{ clientTypeLabelFor(member) }}
+                      </p>
+                    </div>
+                    <div class="shrink-0 text-right">
+                      <span class="block text-[10px] sm:text-xs uppercase tracking-wider" :class="statusClass(member.status)">
+                        {{ statusLabel(member.status) }}
+                      </span>
+                      <button
+                        type="button"
+                        class="mt-1 text-[10px] sm:text-[11px] uppercase tracking-wider transition-colors"
+                        :class="memberConfirmRemove === member.id ? 'text-red-400' : 'text-mist hover:text-red-400'"
+                        :disabled="memberRemoving === member.id"
+                        @click="removeMember(member)"
+                      >
+                        {{ memberRemoving === member.id ? 'Removing…' : memberConfirmRemove === member.id ? 'Confirm?' : 'Remove' }}
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              </ul>
+              <div v-if="filteredMembers.length > membersLimit" class="text-center mt-3">
+                <button
+                  type="button"
+                  class="text-gold text-[11px] sm:text-xs uppercase tracking-wider hover:underline"
+                  @click="membersLimit += 5"
+                >
+                  Show More ({{ filteredMembers.length - membersLimit }} remaining)
+                </button>
+              </div>
+              <div v-if="membersLimit > 5 && filteredMembers.length > 5" class="text-center mt-2">
+                <button
+                  type="button"
+                  class="text-mist text-[10px] sm:text-[11px] uppercase tracking-wider hover:text-cream"
+                  @click="membersLimit = 5"
+                >
+                  Show Less
                 </button>
               </div>
             </template>

@@ -1,3 +1,4 @@
+import { logActivity } from '~/server/utils/activity'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { saveMembershipPayment } from '~/server/utils/membership-payments'
 import { validateMembershipPayload, checkRateLimit } from '~/server/utils/walkin'
@@ -98,6 +99,20 @@ export default defineEventHandler(async (event) => {
     console.error('[Membership] Submit error:', err)
     throw createError({ statusCode: 500, statusMessage: 'Failed to submit payment. Please try again.' })
   }
+
+  await logActivity(supabase, {
+    category: 'payment',
+    action: 'membership_submitted',
+    title: 'Membership payment submitted',
+    description: `${payload.fullName} · ${payload.plan} plan · ₱${payload.amount.toLocaleString()} · pending verification`,
+    clientName: payload.fullName,
+    clientPhone: payload.phone,
+    clientEmail: payload.email,
+    amount: payload.amount,
+    reference: data.id,
+    metadata: { plan: payload.plan, customerType: payload.customerType, status: 'pending' },
+    staff: 'online',
+  })
 
   return {
     message: 'Payment submitted successfully. You will receive an email once staff verifies your payment.',

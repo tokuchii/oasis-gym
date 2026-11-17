@@ -1,3 +1,4 @@
+import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { sendRenewalReminder } from '~/server/utils/email'
@@ -54,6 +55,16 @@ export default defineEventHandler(async (event) => {
       errors.push({ email: member.email, error: errMsg })
       console.error(`[Reminders] Failed to send to ${member.email}:`, errMsg)
     }
+  }
+
+  if (sent > 0) {
+    await logActivity(supabase, {
+      category: 'reminder',
+      action: 'renewal_reminders_sent',
+      title: 'Renewal reminders sent',
+      description: `Sent ${sent} renewal reminder(s)${failed > 0 ? ` · ${failed} failed` : ''}`,
+      metadata: { sent, failed, total: expiring.length },
+    })
   }
 
   return {

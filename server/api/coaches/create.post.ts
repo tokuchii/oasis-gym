@@ -1,3 +1,4 @@
+import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { validateCoachPayload } from '~/server/utils/walkin'
@@ -34,6 +35,14 @@ export default defineEventHandler(async (event) => {
     console.error('[Coaches] Create error:', error)
     throw createError({ statusCode: 500, statusMessage: 'Failed to add coach. Please try again.' })
   }
+
+  await logActivity(supabase, {
+    category: 'update',
+    action: 'coach_created',
+    title: 'Coach added',
+    description: `${data.full_name}${data.specialty ? ` · ${data.specialty}` : ''}`,
+    reference: data.id,
+  })
 
   return {
     coach: {

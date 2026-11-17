@@ -1,3 +1,4 @@
+import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { getPlanRate, type CustomerType, type MembershipPlanId } from '~/types/walkin'
@@ -47,6 +48,18 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 500, statusMessage: 'Failed to update session.' })
     }
 
+    await logActivity(supabase, {
+      category: 'checkout',
+      action: 'client_session_used',
+      title: 'Session used',
+      description: `${client.client_name} · ${newUsed}/${client.total_sessions} sessions`,
+      clientName: client.client_name,
+      clientPhone: client.client_phone,
+      clientEmail: client.client_email,
+      reference: clientId,
+      metadata: { plan: client.plan, sessionsUsed: newUsed, totalSessions: client.total_sessions },
+    })
+
     return { client: updated, message: `Session ${newUsed}/${client.total_sessions} completed.` }
   }
 
@@ -67,6 +80,18 @@ export default defineEventHandler(async (event) => {
       console.error('[Clients] Session remove error:', updateError)
       throw createError({ statusCode: 500, statusMessage: 'Failed to update session.' })
     }
+
+    await logActivity(supabase, {
+      category: 'update',
+      action: 'client_session_removed',
+      title: 'Session removed',
+      description: `${client.client_name} · ${newUsed}/${client.total_sessions} sessions`,
+      clientName: client.client_name,
+      clientPhone: client.client_phone,
+      clientEmail: client.client_email,
+      reference: clientId,
+      metadata: { plan: client.plan, sessionsUsed: newUsed, totalSessions: client.total_sessions },
+    })
 
     return { client: updated, message: `Session removed. ${newUsed}/${client.total_sessions} used.` }
   }
@@ -93,6 +118,19 @@ export default defineEventHandler(async (event) => {
 
     const finalPaid = updated.paid_amount ?? paidAmount ?? client.paid_amount ?? 0
     const isFullyPaid = finalPaid >= totalAmount
+
+    await logActivity(supabase, {
+      category: 'payment',
+      action: 'client_payment_updated',
+      title: 'Payment updated',
+      description: `${client.client_name} · ₱${finalPaid.toLocaleString()} of ₱${totalAmount.toLocaleString()} paid`,
+      clientName: client.client_name,
+      clientPhone: client.client_phone,
+      clientEmail: client.client_email,
+      amount: finalPaid,
+      reference: clientId,
+      metadata: { plan: client.plan, paidAmount: finalPaid, totalAmount, isFullyPaid },
+    })
 
     return {
       client: updated,

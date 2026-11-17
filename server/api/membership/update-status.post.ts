@@ -1,3 +1,4 @@
+import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { createPaidSession } from '~/server/utils/sessions'
@@ -106,6 +107,21 @@ export default defineEventHandler(async (event) => {
   } catch (err) {
     console.error(`[Membership] Failed to send ${status} email:`, err)
   }
+
+  const paymentAmount = data.paid_amount ?? existing.paid_amount ?? data.amount
+
+  await logActivity(supabase, {
+    category: 'payment',
+    action: `payment_${status}`,
+    title: status === 'approved' ? 'Payment approved' : status === 'partial' ? 'Payment marked partial' : 'Payment rejected',
+    description: `${data.full_name} · ${data.plan} plan · ₱${paymentAmount.toLocaleString()} · ${status}`,
+    clientName: data.full_name,
+    clientPhone: data.phone,
+    clientEmail: data.email,
+    amount: paymentAmount,
+    reference: id,
+    metadata: { plan: data.plan, status, expiryDate: data.expiry_date ?? null },
+  })
 
   return {
     message: `Payment ${status === 'approved' ? 'approved' : status === 'partial' ? 'marked as partial' : 'rejected'} successfully.${status === 'approved' || status === 'partial' ? ' Client session active.' : ''}${emailSent ? ' Email sent.' : ''}`,

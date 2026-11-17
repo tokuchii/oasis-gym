@@ -1,3 +1,4 @@
+import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { getPlanDays, getPlanRate, getPlanSessions, type CustomerType, type MembershipPlanId } from '~/types/walkin'
@@ -69,6 +70,19 @@ export default defineEventHandler(async (event) => {
   }
 
   const isFullyPaid = paidAmount != null && paidAmount >= totalAmount
+
+  await logActivity(supabase, {
+    category: 'register',
+    action: 'client_created',
+    title: 'Client added',
+    description: `${clientName} · ${plan} plan · ${totalSessions} sessions`,
+    clientName,
+    clientPhone: clientPhone,
+    clientEmail: clientEmail,
+    amount: paidAmount != null && !isNaN(paidAmount) ? paidAmount : null,
+    reference: data.id,
+    metadata: { plan, totalSessions, paidAmount: paidAmount ?? null, isFullyPaid },
+  })
 
   return {
     client: data,

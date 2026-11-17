@@ -127,6 +127,24 @@ export interface ClientSessionInfo {
   endDate: string
 }
 
+export type ActivityCategory = 'register' | 'checkout' | 'payment' | 'update' | 'delete' | 'reminder'
+
+export interface ActivityLog {
+  id: string
+  category: ActivityCategory
+  action: string
+  title: string
+  description: string | null
+  client_name: string | null
+  client_phone: string | null
+  client_email: string | null
+  amount: number | null
+  reference: string | null
+  metadata: Record<string, string | number | boolean | null> | null
+  staff: string
+  created_at: string
+}
+
 export const PLAN_RATES: Record<CustomerType, Record<MembershipPlanId, number>> = {
   member: { daily: 65, weekly: 270, monthly: 850 },
   non_member: { daily: 85, weekly: 350, monthly: 1000 },
