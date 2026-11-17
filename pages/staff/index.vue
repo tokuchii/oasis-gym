@@ -308,12 +308,19 @@ const ACTIVITY_FILTERS: { id: ActivityCategory | 'all'; label: string }[] = [
   { id: 'reminder', label: 'Reminder' },
 ]
 
+const ACTIVITY_PAGE_SIZE = 5
+
 const activities = ref<ActivityItem[]>([])
 const activitiesLoading = ref(false)
 const activitiesError = ref('')
 const showActivityModal = ref(false)
 const activityFilter = ref<ActivityCategory | 'all'>('all')
 const activitySearch = ref('')
+const activityLimit = ref(ACTIVITY_PAGE_SIZE)
+
+watch([activityFilter, activitySearch], () => {
+  activityLimit.value = ACTIVITY_PAGE_SIZE
+})
 
 const activityCounts = computed(() => {
   const counts: Record<string, number> = { all: activities.value.length }
@@ -369,6 +376,7 @@ function openActivityModal() {
   showActivityModal.value = true
   activityFilter.value = 'all'
   activitySearch.value = ''
+  activityLimit.value = ACTIVITY_PAGE_SIZE
   loadActivities()
 }
 
@@ -679,6 +687,7 @@ function resetTabState(tab: StaffTab) {
     showActivityModal.value = false
     activityFilter.value = 'all'
     activitySearch.value = ''
+    activityLimit.value = ACTIVITY_PAGE_SIZE
     activitiesError.value = ''
   } else if (tab === 'checkout') {
     selectedPass.value = null
@@ -2334,7 +2343,7 @@ onMounted(async () => {
                 </div>
                 <ul v-else class="divide-y divide-iron/40">
                   <li
-                    v-for="activity in activities.slice(0, 8)"
+                    v-for="activity in activities.slice(0, ACTIVITY_PAGE_SIZE)"
                     :key="activity.id"
                     class="flex items-start justify-between gap-3 px-4 py-3"
                   >
@@ -2359,9 +2368,9 @@ onMounted(async () => {
                     </div>
                   </li>
                 </ul>
-                <div v-if="activities.length > 8" class="border-t border-iron px-4 py-2.5 text-center">
+                <div v-if="activities.length > ACTIVITY_PAGE_SIZE" class="border-t border-iron px-4 py-2.5 text-center">
                   <button type="button" class="text-gold text-[10px] sm:text-xs uppercase tracking-wider hover:underline" @click="openActivityModal">
-                    View all {{ activities.length }} activities
+                    See More ({{ activities.length - ACTIVITY_PAGE_SIZE }})
                   </button>
                 </div>
               </div>
@@ -2425,7 +2434,7 @@ onMounted(async () => {
                       </p>
                       <ul v-else class="divide-y divide-iron/40">
                         <li
-                          v-for="activity in filteredActivities"
+                          v-for="activity in filteredActivities.slice(0, activityLimit)"
                           :key="activity.id"
                           class="flex items-start justify-between gap-3 py-3"
                         >
@@ -2454,6 +2463,24 @@ onMounted(async () => {
                           </div>
                         </li>
                       </ul>
+                      <div v-if="filteredActivities.length > activityLimit" class="text-center pt-3">
+                        <button
+                          type="button"
+                          class="text-gold text-[10px] sm:text-xs uppercase tracking-wider hover:underline"
+                          @click="activityLimit += ACTIVITY_PAGE_SIZE"
+                        >
+                          See More ({{ filteredActivities.length - activityLimit }} remaining)
+                        </button>
+                      </div>
+                      <div v-if="activityLimit > ACTIVITY_PAGE_SIZE && filteredActivities.length > ACTIVITY_PAGE_SIZE" class="text-center pt-2">
+                        <button
+                          type="button"
+                          class="text-mist text-[10px] sm:text-[11px] uppercase tracking-wider hover:text-cream"
+                          @click="activityLimit = ACTIVITY_PAGE_SIZE"
+                        >
+                          See Less
+                        </button>
+                      </div>
                     </div>
 
                     <div class="px-4 sm:px-6 py-3 border-t border-iron shrink-0 flex items-center justify-between gap-2">
