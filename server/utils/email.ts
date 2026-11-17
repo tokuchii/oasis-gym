@@ -208,6 +208,73 @@ export async function sendMembershipRejectedEmail(params: {
   )
 }
 
+export async function sendSessionLowReminder(params: {
+  to: string
+  fullName: string
+  plan: string
+  remaining: number
+  expiryDate: string
+}) {
+  const planLabel = getPlanLabel(params.plan)
+
+  return sendEmail(
+    params.to,
+    `Only ${params.remaining} session${params.remaining === 1 ? '' : 's'} left on your OASIS FITNESS GYM plan`,
+    `
+      <div style="${getEmailStyles()}">
+        ${getHeader()}
+        <div style="border: 1px solid #C9A84C; padding: 30px; text-align: center; margin-bottom: 30px;">
+          <p style="color: #C9A84C; font-size: 12px; text-transform: uppercase; letter-spacing: 3px; margin-bottom: 10px;">Session Reminder</p>
+          <h2 style="font-size: 24px; margin: 10px 0;">${params.fullName}</h2>
+          <p style="color: #A89F8C; font-size: 14px;">${planLabel} Membership</p>
+          <p style="color: #E2C97E; font-size: 18px; font-weight: bold; margin-top: 15px;">${params.remaining} session${params.remaining === 1 ? '' : 's'} remaining</p>
+          <p style="color: #A89F8C; font-size: 12px; margin-top: 8px;">Plan valid until ${params.expiryDate}</p>
+        </div>
+        <div style="text-align: center; margin-bottom: 30px;">
+          <p style="color: #A89F8C; font-size: 13px; line-height: 1.6;">
+            You are close to using up the sessions on your ${planLabel} plan.<br>
+            Visit the front desk to renew and keep your access active.
+          </p>
+        </div>
+        ${getFooter()}
+      </div>
+    `,
+    `OASIS FITNESS GYM — Session Reminder\n\nHi ${params.fullName},\n\nYou have ${params.remaining} session${params.remaining === 1 ? '' : 's'} left on your ${planLabel} plan (valid until ${params.expiryDate}).\nVisit the front desk to renew.\n\nOASIS FITNESS GYM\n${GYM_ADDRESS}`,
+  )
+}
+
+export async function sendSessionCompletedEmail(params: {
+  to: string
+  fullName: string
+  plan: string
+}) {
+  const planLabel = getPlanLabel(params.plan)
+
+  return sendEmail(
+    params.to,
+    `Your OASIS FITNESS GYM ${planLabel} plan is complete`,
+    `
+      <div style="${getEmailStyles()}">
+        ${getHeader()}
+        <div style="border: 1px solid #28a745; padding: 30px; text-align: center; margin-bottom: 30px;">
+          <p style="color: #28a745; font-size: 12px; text-transform: uppercase; letter-spacing: 3px; margin-bottom: 10px;">Plan Complete</p>
+          <h2 style="font-size: 24px; margin: 10px 0;">${params.fullName}</h2>
+          <p style="color: #A89F8C; font-size: 14px;">${planLabel} Membership</p>
+        </div>
+        <div style="text-align: center; margin-bottom: 30px;">
+          <p style="color: #A89F8C; font-size: 13px; line-height: 1.6;">
+            You have used all sessions on your ${planLabel} plan.<br>
+            Thank you for training with us! Renew your plan to continue.
+          </p>
+          <p style="color: #C9A84C; font-size: 14px; margin-top: 20px; font-weight: bold;">See you at the gym!</p>
+        </div>
+        ${getFooter()}
+      </div>
+    `,
+    `OASIS FITNESS GYM — Plan Complete\n\nHi ${params.fullName},\n\nYou have used all sessions on your ${planLabel} plan. Renew your plan to continue training with us.\n\nOASIS FITNESS GYM\n${GYM_ADDRESS}`,
+  )
+}
+
 export async function sendRenewalReminder(params: {
   to: string
   fullName: string

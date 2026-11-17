@@ -1,6 +1,7 @@
 import { useSupabaseAdmin } from '~/server/utils/supabase'
+import { saveMembershipPayment } from '~/server/utils/membership-payments'
 import { validateMembershipPayload, checkRateLimit } from '~/server/utils/walkin'
-import { getPlanDays, getPlanRate, type MembershipPlanId } from '~/types/walkin'
+import { getPlanDays, getPlanRate, type CustomerType, type MembershipPlanId } from '~/types/walkin'
 
 export default defineEventHandler(async (event) => {
   const ip = getRequestHeader(event, 'x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
@@ -70,28 +71,31 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: 'Failed to upload receipt. Please try again.' })
   }
 
-  const { data, error } = await supabase
-    .from('membership_payments')
-    .insert({
+  let data
+  try {
+    const saved = await saveMembershipPayment(supabase, {
       full_name: payload.fullName,
       email: payload.email,
       phone: payload.phone,
-      plan: payload.plan,
-      customer_type: payload.customerType,
-      plan_price: getPlanRate(payload.plan as MembershipPlanId, payload.customerType as 'member' | 'non_member'),
+      plan: payload.plan as MembershipPlanId,
+      customer_type: payload.customerType as CustomerType,
+      plan_price: getPlanRate(payload.plan as MembershipPlanId, payload.customerType as CustomerType),
+      membership_fee: 0,
+      instructor_fee: 0,
       coach,
       payment_method: payload.paymentMethod,
       reference_no: payload.referenceNo || null,
       amount: payload.amount,
       receipt_url: filePath,
+      status: 'pending',
       expiry_date: expiryDateStr,
+      note: null,
+      paid_amount: null,
       reminder_sent: false,
     })
-    .select('*')
-    .single()
-
-  if (error) {
-    console.error('[Membership] Insert error:', error)
+    data = saved.payment
+  } catch (err) {
+    console.error('[Membership] Submit error:', err)
     throw createError({ statusCode: 500, statusMessage: 'Failed to submit payment. Please try again.' })
   }
 

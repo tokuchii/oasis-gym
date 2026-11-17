@@ -6,7 +6,7 @@ create table if not exists walkin_passes (
   pass_code         text unique not null,
   full_name         text not null,
   email             text not null,
-  phone             text unique not null,
+  phone             text not null,
   emergency_contact text not null,
   visit_date        date not null default (timezone('Asia/Manila', now()))::date,
   status            text not null default 'registered' check (status in ('registered', 'checked_in', 'expired')),
@@ -158,3 +158,46 @@ alter table client_sessions
   check (customer_type in ('member', 'non_member'));
 
 create index if not exists client_sessions_payment_id_idx on client_sessions (payment_id);
+
+-- Session reminders + completion tracking on client sessions.
+alter table client_sessions add column if not exists low_session_reminder_sent boolean not null default false;
+alter table client_sessions add column if not exists completion_notified boolean not null default false;
+alter table client_sessions add column if not exists completed_at timestamptz;
+
+-- Every successful plan check-out is logged so sessions can be counted in reports.
+create table if not exists client_session_usage (
+  id                uuid primary key default gen_random_uuid(),
+  session_id        uuid,
+  client_name       text not null,
+  client_email      text,
+  client_phone      text not null,
+  plan              text not null check (plan in ('daily', 'weekly', 'monthly')),
+  used_at           timestamptz not null default now(),
+  used_date         date not null default (timezone('Asia/Manila', now()))::date,
+  pass_code         text,
+  staff             text
+);
+
+create index if not exists client_session_usage_date_idx on client_session_usage (used_date);
+create index if not exists client_session_usage_session_idx on client_session_usage (session_id);
+create index if not exists client_session_usage_phone_idx on client_session_usage (client_phone);
+
+alter table client_session_usage enable row level security;
+
+-- Phone is optional and may be shared; duplicates are prevented by name + phone + email.
+alter table walkin_passes drop constraint if exists walkin_passes_phone_key;
+drop index if exists walkin_passes_phone_unique_idx;
+
+-- Align existing session totals with the current plan definitions (weekly = 7, monthly = 30).
+update client_sessions set total_sessions = 7 where plan = 'weekly' and total_sessions <> 7;
+update client_sessions set total_sessions = 30 where plan = 'monthly' and total_sessions <> 30;
+update client_sessions set total_sessions = 1 where plan = 'daily' and total_sessions <> 1;
+
+-- Re-open sessions that were marked complete only because of an old lower session total.
+update client_sessions
+set status = 'active',
+    completed_at = null,
+    completion_notified = false
+where status = 'completed'
+  and sessions_used < total_sessions
+  and end_date >= (timezone('Asia/Manila', now()))::date;

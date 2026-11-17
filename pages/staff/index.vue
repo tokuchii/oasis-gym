@@ -44,6 +44,15 @@ interface PassResult {
   points: number
   memberStatus: string
   customerType: CustomerType
+  session?: {
+    plan: MembershipPlanId
+    totalSessions: number
+    sessionsUsed: number
+    sessionsRemaining: number
+    status: 'active' | 'completed' | 'expired'
+    startDate: string
+    endDate: string
+  } | null
 }
 
 interface CoachItem {
@@ -74,9 +83,42 @@ interface ReportSummary {
   walkinRevenue: number
   membershipRevenue: number
   uniqueMembers: number
+  sessionsUsedInPeriod: number
+  activePlans: number
+  sessionsRemaining: number
+  completedPlans: number
+  expiredPlans: number
   dateFrom: string
   dateTo: string
   period: string
+}
+
+interface SessionAlert {
+  id: string
+  fullName: string
+  email: string
+  phone: string
+  plan: MembershipPlanId
+  sessionsUsed: number
+  totalSessions: number
+  sessionsRemaining: number
+  endDate: string
+  type: 'low' | 'expired'
+}
+
+interface PlanSession {
+  id: string
+  fullName: string
+  email: string
+  phone: string
+  plan: MembershipPlanId
+  customerType: CustomerType
+  sessionsUsed: number
+  totalSessions: number
+  sessionsRemaining: number
+  startDate: string
+  endDate: string
+  status: 'active' | 'completed' | 'expired'
 }
 
 interface ChartPoint {
@@ -151,7 +193,7 @@ function clientTypeLabelFor(member: PassResult): string {
 }
 
 function clientDefaultRateFor(member: PassResult): number {
-  return clientDefaultRate(member.customerType ?? 'non_member', (member.memberStatus ?? 'walkin') as MemberStatus)
+  return PLAN_RATES[member.customerType ?? 'non_member'].daily
 }
 
 function clientTypeClass(member: PassResult): string {
@@ -159,6 +201,29 @@ function clientTypeClass(member: PassResult): string {
   if (member.memberStatus === 'weekly') return 'text-sky-300'
   if (member.memberStatus === 'monthly') return 'text-gold'
   return 'text-green-400'
+}
+
+function sessionClass(member: PassResult): string {
+  if (!member.session) return 'text-mist'
+  if (member.session.status === 'expired' || member.session.sessionsRemaining <= 0) return 'text-red-400'
+  if (member.session.sessionsRemaining <= 2) return 'text-orange-400'
+  return 'text-green-400'
+}
+
+function sessionLabel(member: PassResult): string {
+  if (!member.session) return 'No plan sessions yet'
+  return `${member.session.sessionsUsed}/${member.session.totalSessions} sessions used · ${member.session.sessionsRemaining} left`
+}
+
+function canCheckout(member: PassResult | null): boolean {
+  if (!member || member.status !== 'registered') return false
+  if (member.memberStatus === 'weekly' || member.memberStatus === 'monthly') {
+    if (member.session) {
+      const expired = member.session.status === 'expired' || member.session.endDate < manilaToday()
+      if (expired || member.session.sessionsRemaining <= 0) return false
+    }
+  }
+  return true
 }
 
 const memberStatusCounts = computed(() => {
@@ -200,7 +265,7 @@ const reportGeneratedAtLabel = computed(() => reportGeneratedAt.value ? formatPd
 const reportLoading = ref(false)
 const reportError = ref('')
 const reportGeneratedAt = ref('')
-const reportData = ref<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[]; availableDates: string[] } | null>(null)
+const reportData = ref<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[]; availableDates: string[]; planSessions: PlanSession[]; sessionAlerts: SessionAlert[] } | null>(null)
 
 const showExportModal = ref(false)
 const exportFrom = ref('')
@@ -220,6 +285,7 @@ const sortedVisits = computed(() => {
 const reminderLoading = ref(false)
 const reminderMessage = ref('')
 const reminderError = ref('')
+const sessionReminderLoading = ref(false)
 
 async function sendReminders() {
   reminderLoading.value = true
@@ -235,6 +301,24 @@ async function sendReminders() {
     toast.error(fetchErr.data?.statusMessage ?? 'Failed to send reminders.')
   } finally {
     reminderLoading.value = false
+  }
+}
+
+async function sendSessionReminders() {
+  sessionReminderLoading.value = true
+
+  try {
+    const api = useApi()
+    const data = await api<{ message: string; sent: number; failed: number }>(apiUrl('/api/staff/session-reminders'), {
+      method: 'POST',
+    })
+    toast.success(data.message)
+    await loadReports()
+  } catch (err: unknown) {
+    const fetchErr = err as { data?: { statusMessage?: string } }
+    toast.error(fetchErr.data?.statusMessage ?? 'Failed to send session reminders.')
+  } finally {
+    sessionReminderLoading.value = false
   }
 }
 
@@ -351,6 +435,14 @@ function resetState() {
   walkinPassCode.value = ''
 }
 
+function closeTransactionModals() {
+  selectedPass.value = null
+  showExportModal.value = false
+  receiptModalUrl.value = ''
+  receiptModalName.value = ''
+  receiptModalLoading.value = false
+}
+
 const walkinPhone = computed(() => (walkinPhoneLocal.value ? `+63${walkinPhoneLocal.value}` : ''))
 
 function onPhoneInput(event: Event) {
@@ -378,8 +470,9 @@ async function submitWalkin() {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Email format is invalid.')
 
   const phone = walkinPhone.value
-  if (!phone) errors.push('Phone number is required.')
-  else if (!/^(\+639|09)\d{9}$/.test(phone)) errors.push('Phone must be a valid Philippine mobile number (+639XXXXXXXXX).')
+  if (phone && !/^(\+639|09)\d{9}$/.test(phone)) {
+    errors.push('Phone must be a valid Philippine mobile number (+639XXXXXXXXX).')
+  }
 
   const emergency = walkinForm.emergencyContact.trim()
   if (emergency && emergency.length < 2) errors.push('Emergency contact must be at least 2 characters.')
@@ -486,6 +579,8 @@ function resetTabState(tab: StaffTab) {
     txForm.note = ''
     txMemberSearch.value = ''
     txError.value = ''
+    paymentsStatusFilter.value = 'all'
+    paymentsSearch.value = ''
     paymentsError.value = ''
     paymentNoteInput.value = ''
     paymentPaidAmountInput.value = ''
@@ -514,8 +609,7 @@ watch(activeTab, (tab, prevTab) => {
 function syncCheckinFromPass(pass: PassResult) {
   const type: CustomerType = pass.customerType === 'member' ? 'member' : 'non_member'
   checkinCustomerType.value = type
-  const hasPlan = type === 'member' && (pass.memberStatus === 'weekly' || pass.memberStatus === 'monthly')
-  checkinPaymentAmount.value = hasPlan ? 0 : PLAN_RATES[type].daily
+  checkinPaymentAmount.value = PLAN_RATES[type].daily
 }
 
 function selectPass(pass: PassResult) {
@@ -534,15 +628,19 @@ async function checkIn(passCode: string, auto = false) {
   checkinError.value = ''
 
   try {
-    const data = await cachedPost<{ pass: PassResult; message: string }>('/api/walkin/checkout', {
+    const data = await cachedPost<{ pass: PassResult; message: string; sessionsRemaining?: number | null }>('/api/walkin/checkout', {
       passCode, paymentAmount: checkinPaymentAmount.value,
     }, {
       label: `Checkout ${passCode}`,
       cacheInvalidates: ['passes', 'reports'],
     })
     checkinMessage.value = data.message
-    toast.success(data.message)
-    selectedPass.value = data.pass
+    if (data.sessionsRemaining != null && data.sessionsRemaining <= 2) {
+      toast.warning(data.message)
+    } else {
+      toast.success(data.message)
+    }
+    selectedPass.value = null
     await loadMembers()
   } catch (err: unknown) {
     if (String(err).includes('Queued')) {
@@ -682,6 +780,7 @@ interface MembershipPayment {
   paidAmount: number | null
   expiryDate: string | null
   createdAt: string
+  isRemoved: boolean
 }
 
 interface PaymentSummary {
@@ -698,6 +797,37 @@ const paymentsList = ref<MembershipPayment[]>([])
 const paymentsSummary = ref<PaymentSummary | null>(null)
 const paymentsLoading = ref(false)
 const paymentsError = ref('')
+type PaymentsStatusFilter = 'all' | 'pending' | 'partial' | 'approved' | 'rejected' | 'history'
+const paymentsStatusFilter = ref<PaymentsStatusFilter>('all')
+const paymentsSearch = ref('')
+
+const filteredPayments = computed(() => {
+  const filter = paymentsStatusFilter.value
+  const query = paymentsSearch.value.trim().toLowerCase()
+
+  return paymentsList.value.filter((p) => {
+    if (filter === 'history') {
+      if (!(p.status === 'approved' && p.isRemoved)) return false
+    } else if (filter === 'approved') {
+      if (!(p.status === 'approved' && !p.isRemoved)) return false
+    } else if (filter !== 'all' && p.status !== filter) {
+      return false
+    }
+
+    if (query && !p.fullName.toLowerCase().includes(query)) return false
+    return true
+  })
+})
+
+function setPaymentsStatusFilter(filter: Exclude<PaymentsStatusFilter, 'all'>) {
+  paymentsStatusFilter.value = paymentsStatusFilter.value === filter ? 'all' : filter
+}
+
+function clearPaymentsFilters() {
+  paymentsStatusFilter.value = 'all'
+  paymentsSearch.value = ''
+}
+
 const paymentActionLoading = ref('')
 const paymentNoteInput = ref('')
 const paymentPaidAmountInput = ref('')
@@ -841,9 +971,10 @@ async function submitTransaction() {
       note: txForm.note,
     }, {
       label: `Transaction for ${txForm.memberName}`,
-      cacheInvalidates: ['clients', 'passes'],
+      cacheInvalidates: ['clients', 'passes', 'reports'],
     })
     toast.success(data.message)
+    closeTransactionModals()
     clearTxMember()
     txForm.plan = 'monthly'
     txForm.customerType = 'member'
@@ -920,10 +1051,11 @@ async function updatePaymentStatus(id: string, status: 'approved' | 'rejected' |
     }
     await cachedPost('/api/membership/update-status', body, {
       label: `${label} payment`,
-      cacheInvalidates: ['clients'],
+      cacheInvalidates: ['clients', 'reports'],
     })
     paymentNoteInput.value = ''
     paymentPaidAmountInput.value = ''
+    closeTransactionModals()
     await loadPayments()
   } catch (err: unknown) {
     if (String(err).includes('Queued')) {
@@ -944,9 +1076,10 @@ async function markPartialDone(payment: MembershipPayment) {
       id: payment.id, status: 'approved', paidAmount: payment.amount, note: 'Remaining balance paid — fully settled.',
     }, {
       label: `Mark ${payment.fullName} done`,
-      cacheInvalidates: ['clients'],
+      cacheInvalidates: ['clients', 'reports'],
     })
     toast.success(`${payment.fullName}'s payment marked as fully paid.`)
+    closeTransactionModals()
     await loadPayments()
   } catch (err: unknown) {
     if (String(err).includes('Queued')) {
@@ -973,7 +1106,7 @@ async function addPartialPayment(payment: MembershipPayment) {
       id: payment.id, addAmount, note: paymentPartialNoteInput.value.trim() || null,
     }, {
       label: `Add ₱${addAmount} to ${payment.fullName}`,
-      cacheInvalidates: ['clients'],
+      cacheInvalidates: ['clients', 'reports'],
     })
     if (result.overpayment > 0) {
       toast.success(`₱${addAmount.toLocaleString()} added. ₱${result.overpayment.toLocaleString()} overpaid — ready for approval.`)
@@ -982,6 +1115,7 @@ async function addPartialPayment(payment: MembershipPayment) {
     }
     paymentPartialAmountInput.value = ''
     paymentPartialNoteInput.value = ''
+    closeTransactionModals()
     await loadPayments()
   } catch (err: unknown) {
     if (String(err).includes('Queued')) {
@@ -1003,9 +1137,10 @@ async function approvePartialPayment(payment: MembershipPayment) {
       id: payment.id, status: 'approved', paidAmount: payment.paidAmount, note: 'Fully settled — approved.',
     }, {
       label: `Approve ${payment.fullName}`,
-      cacheInvalidates: ['clients'],
+      cacheInvalidates: ['clients', 'reports'],
     })
     toast.success(`${payment.fullName}'s payment approved.`)
+    closeTransactionModals()
     await loadPayments()
   } catch (err: unknown) {
     if (String(err).includes('Queued')) {
@@ -1033,7 +1168,7 @@ async function loadReports() {
 
   try {
     const params: Record<string, string> = { period: reportPeriod.value }
-    const data = await cachedGet<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[]; availableDates: string[] }>('/api/staff/reports', {
+    const data = await cachedGet<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[]; availableDates: string[]; planSessions: PlanSession[]; sessionAlerts: SessionAlert[] }>('/api/staff/reports', {
       params,
       cache: { store: 'reports', label: 'Reports' },
     })
@@ -1305,7 +1440,7 @@ function formatPdfDateTime(value: string): string {
   }).format(new Date(value))
 }
 
-async function downloadReportPdf(data: { visits: ReportVisit[]; summary: ReportSummary }) {
+async function downloadReportPdf(data: { visits: ReportVisit[]; summary: ReportSummary; planSessions?: PlanSession[]; sessionAlerts?: SessionAlert[] }) {
   const { jsPDF } = await import('jspdf')
   const { autoTable } = await import('jspdf-autotable')
 
@@ -1440,7 +1575,86 @@ async function downloadReportPdf(data: { visits: ReportVisit[]; summary: ReportS
   })
 
   const revenueEndY = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? revenueTitleY + 20
-  const logTitleY = revenueEndY + 9
+  const sessionTitleY = revenueEndY + 9
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(10)
+  doc.setTextColor(...ink)
+  doc.text('Session Usage', margin, sessionTitleY)
+  doc.setDrawColor(...line)
+  doc.line(margin, sessionTitleY + 2, pageWidth - margin, sessionTitleY + 2)
+
+  const sessionBody = [
+    ['Sessions used in period', String(data.summary.sessionsUsedInPeriod)],
+    ['Sessions remaining on active plans', String(data.summary.sessionsRemaining)],
+    ['Active plans', String(data.summary.activePlans)],
+    ['Completed plans', String(data.summary.completedPlans)],
+    ['Expired plans', String(data.summary.expiredPlans)],
+  ]
+
+  autoTable(doc, {
+    startY: sessionTitleY + 5,
+    head: [['Metric', 'Count']],
+    body: sessionBody,
+    margin: { left: margin, right: margin },
+    theme: 'grid',
+    styles: {
+      font: 'helvetica',
+      fontSize: 8,
+      cellPadding: 2.2,
+      textColor: ink,
+      lineColor: line,
+      lineWidth: 0.2,
+    },
+    headStyles: { fillColor: gold, textColor: white, fontStyle: 'bold', fontSize: 7.5 },
+    columnStyles: {
+      0: { cellWidth: contentWidth * 0.72 },
+      1: { halign: 'right', cellWidth: contentWidth * 0.28 },
+    },
+  })
+
+  let contentEndY = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? sessionTitleY + 20
+  const sessionAlerts = data.sessionAlerts ?? []
+
+  if (sessionAlerts.length > 0) {
+    const alertsTitleY = contentEndY + 9
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(10)
+    doc.setTextColor(...ink)
+    doc.text(`Session Alerts (${sessionAlerts.length})`, margin, alertsTitleY)
+    doc.setDrawColor(...line)
+    doc.line(margin, alertsTitleY + 2, pageWidth - margin, alertsTitleY + 2)
+
+    autoTable(doc, {
+      startY: alertsTitleY + 5,
+      head: [['Client', 'Phone', 'Plan', 'Sessions Left', 'Status']],
+      body: sessionAlerts.map((alert) => [
+        alert.fullName,
+        alert.phone,
+        alert.plan,
+        `${alert.sessionsRemaining}/${alert.totalSessions}`,
+        alert.type === 'expired' ? `Expired ${alert.endDate}` : 'Low sessions',
+      ]),
+      margin: { left: margin, right: margin, top: 16, bottom: 18 },
+      theme: 'striped',
+      styles: {
+        font: 'helvetica',
+        fontSize: 7.5,
+        cellPadding: 2,
+        textColor: ink,
+        lineColor: line,
+        lineWidth: 0.15,
+        overflow: 'linebreak',
+        valign: 'middle',
+      },
+      headStyles: { fillColor: gold, textColor: white, fontStyle: 'bold', fontSize: 7 },
+      alternateRowStyles: { fillColor: [249, 250, 251] },
+    })
+
+    contentEndY = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? contentEndY
+  }
+
+  const logTitleY = contentEndY + 9
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10)
@@ -1523,7 +1737,7 @@ async function exportRange() {
 
   exportLoading.value = true
   try {
-    const data = await cachedGet<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[]; availableDates: string[] }>('/api/staff/reports', {
+    const data = await cachedGet<{ visits: ReportVisit[]; summary: ReportSummary; chartData: ChartPoint[]; availableDates: string[]; planSessions: PlanSession[]; sessionAlerts: SessionAlert[] }>('/api/staff/reports', {
       params: { from: exportFrom.value, to: exportTo.value },
       cache: { store: 'reports', label: 'Export report' },
     })
@@ -1824,6 +2038,86 @@ onMounted(async () => {
                 </div>
               </div>
 
+              <div class="border border-iron bg-graphite/30 mb-4 sm:mb-6">
+                <div class="flex items-center justify-between gap-2 px-4 py-3 border-b border-iron">
+                  <div>
+                    <h3 class="font-display text-base sm:text-lg text-cream tracking-wide">Session Usage</h3>
+                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">{{ reportPeriodLabel }} · weekly and monthly plans</p>
+                  </div>
+                  <div class="flex items-center gap-2 sm:gap-3">
+                    <span class="text-gold text-[9px] sm:text-[10px] uppercase tracking-wider">{{ reportData.summary.activePlans }} active</span>
+                    <button
+                      type="button"
+                      class="btn-outline text-[9px] sm:text-[10px] px-2 sm:px-3 py-1"
+                      :disabled="sessionReminderLoading"
+                      @click="sendSessionReminders"
+                    >
+                      {{ sessionReminderLoading ? 'Sending…' : 'Send Session Reminders' }}
+                    </button>
+                  </div>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-px bg-iron">
+                  <div class="bg-onyx px-4 py-3">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Used in Period</p>
+                    <p class="font-display text-xl sm:text-2xl text-cream tabular-nums">{{ reportData.summary.sessionsUsedInPeriod }}</p>
+                  </div>
+                  <div class="bg-onyx px-4 py-3">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Sessions Left</p>
+                    <p class="font-display text-xl sm:text-2xl text-green-400 tabular-nums">{{ reportData.summary.sessionsRemaining }}</p>
+                  </div>
+                  <div class="bg-onyx px-4 py-3">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Active Plans</p>
+                    <p class="font-display text-xl sm:text-2xl text-blue-400 tabular-nums">{{ reportData.summary.activePlans }}</p>
+                  </div>
+                  <div class="bg-onyx px-4 py-3">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Completed</p>
+                    <p class="font-display text-xl sm:text-2xl text-gold tabular-nums">{{ reportData.summary.completedPlans }}</p>
+                  </div>
+                  <div class="bg-onyx px-4 py-3">
+                    <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Expired</p>
+                    <p class="font-display text-xl sm:text-2xl text-red-400 tabular-nums">{{ reportData.summary.expiredPlans }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="reportData.sessionAlerts?.length" class="border border-iron bg-graphite/30 mb-4 sm:mb-6">
+                <div class="flex items-center justify-between gap-2 px-4 py-3 border-b border-iron">
+                  <div>
+                    <h3 class="font-display text-base sm:text-lg text-cream tracking-wide">Session Alerts</h3>
+                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">Clients with 2 or fewer sessions left or an expired plan</p>
+                  </div>
+                  <span class="text-orange-400 text-[9px] sm:text-[10px] uppercase tracking-wider">{{ reportData.sessionAlerts.length }} alert(s)</span>
+                </div>
+                <div class="overflow-x-auto">
+                  <table class="w-full text-[10px] sm:text-xs min-w-[520px]">
+                    <thead>
+                      <tr class="bg-obsidian/60 border-b border-iron">
+                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Client</th>
+                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Contact</th>
+                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Plan</th>
+                        <th class="text-right p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Sessions</th>
+                        <th class="text-right p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="alert in reportData.sessionAlerts" :key="alert.id" class="border-b border-iron/40 last:border-0">
+                        <td class="p-2.5 sm:p-3 text-cream">{{ alert.fullName }}</td>
+                        <td class="p-2.5 sm:p-3 text-mist">{{ alert.phone }}</td>
+                        <td class="p-2.5 sm:p-3 text-cream uppercase">{{ alert.plan }}</td>
+                        <td class="p-2.5 sm:p-3 text-right tabular-nums" :class="alert.type === 'expired' ? 'text-red-400' : 'text-orange-400'">
+                          {{ alert.sessionsRemaining }}/{{ alert.totalSessions }} left
+                        </td>
+                        <td class="p-2.5 sm:p-3 text-right">
+                          <span class="inline-flex items-center px-2 py-0.5 text-[9px] sm:text-[10px] uppercase tracking-wider border" :class="alert.type === 'expired' ? 'border-red-400/40 text-red-400 bg-red-400/5' : 'border-orange-400/40 text-orange-400 bg-orange-400/5'">
+                            {{ alert.type === 'expired' ? `Expired ${alert.endDate}` : 'Low sessions' }}
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
               <div v-if="reportData?.chartData?.length > 0 && reportData.chartData.some(p => p.revenue > 0)" class="border border-iron bg-graphite/30 mb-4 sm:mb-6">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 border-b border-iron">
                   <div>
@@ -2064,12 +2358,15 @@ onMounted(async () => {
                   <div class="flex items-center justify-between gap-3 sm:gap-4">
                     <div class="min-w-0">
                       <p class="text-cream font-medium text-sm sm:text-base truncate">{{ member.fullName }}</p>
-                      <p class="text-mist text-xs sm:text-sm truncate">{{ member.phone }}</p>
+                      <p class="text-mist text-xs sm:text-sm truncate">{{ member.phone || 'No phone' }}</p>
                       <p class="text-[10px] sm:text-xs uppercase tracking-wider mt-0.5" :class="clientTypeClass(member)">
                         {{ clientTypeLabelFor(member) }}
                       </p>
                       <p class="text-mist text-[10px] sm:text-xs mt-0.5">
                         Default: ₱{{ clientDefaultRateFor(member).toLocaleString() }}
+                      </p>
+                      <p v-if="member.memberStatus === 'weekly' || member.memberStatus === 'monthly'" class="text-[10px] sm:text-xs mt-0.5" :class="sessionClass(member)">
+                        {{ sessionLabel(member) }}
                       </p>
                       <label class="inline-flex items-center gap-1.5 mt-1 text-[10px] sm:text-xs text-mist cursor-pointer" @click.stop>
                         <input
@@ -2154,7 +2451,7 @@ onMounted(async () => {
                   </div>
                   <div class="flex justify-between gap-3 sm:gap-4">
                     <dt class="text-mist shrink-0">Phone</dt>
-                    <dd class="text-cream text-right">{{ selectedPass.phone }}</dd>
+                    <dd class="text-cream text-right">{{ selectedPass.phone || '—' }}</dd>
                   </div>
                   <div class="flex justify-between gap-3 sm:gap-4">
                     <dt class="text-mist shrink-0">Email</dt>
@@ -2183,6 +2480,20 @@ onMounted(async () => {
                   <div class="flex justify-between gap-3 sm:gap-4">
                     <dt class="text-mist shrink-0">Default Rate</dt>
                     <dd class="text-cream text-right">₱{{ clientDefaultRateFor(selectedPass).toLocaleString() }}</dd>
+                  </div>
+                  <div v-if="selectedPass.session" class="flex justify-between gap-3 sm:gap-4">
+                    <dt class="text-mist shrink-0">Plan Sessions</dt>
+                    <dd class="text-right" :class="sessionClass(selectedPass)">
+                      {{ selectedPass.session.sessionsUsed }}/{{ selectedPass.session.totalSessions }} used · {{ selectedPass.session.sessionsRemaining }} left
+                    </dd>
+                  </div>
+                  <div v-if="selectedPass.session" class="flex justify-between gap-3 sm:gap-4">
+                    <dt class="text-mist shrink-0">Plan Expires</dt>
+                    <dd class="text-cream text-right">{{ selectedPass.session.endDate }}</dd>
+                  </div>
+                  <div v-else-if="selectedPass.memberStatus === 'weekly' || selectedPass.memberStatus === 'monthly'" class="flex justify-between gap-3 sm:gap-4">
+                    <dt class="text-mist shrink-0">Sessions</dt>
+                    <dd class="text-orange-400 text-right">Not started yet</dd>
                   </div>
                 </dl>
 
@@ -2250,12 +2561,15 @@ onMounted(async () => {
                   v-if="selectedPass.status === 'registered'"
                   type="button"
                   class="btn-primary w-full"
-                  :disabled="checkinLoading"
+                  :disabled="checkinLoading || !canCheckout(selectedPass)"
                   @click="checkIn(selectedPass.passCode)"
                 >
                   {{ checkinLoading ? 'Checking out…' : 'Check Out Guest' }}
                 </button>
-                <p v-else class="text-green-400 text-xs sm:text-sm text-center">
+                <p v-if="selectedPass.status === 'registered' && !canCheckout(selectedPass)" class="text-orange-400 text-xs sm:text-sm text-center mt-2">
+                  No sessions remaining or the plan expired. Record a renewal in the Payment tab first.
+                </p>
+                <p v-else-if="selectedPass.status !== 'registered'" class="text-green-400 text-xs sm:text-sm text-center">
                   Already checked out today. Come back tomorrow for another session.
                 </p>
 
@@ -2352,7 +2666,9 @@ onMounted(async () => {
                     <input id="wi-email" v-model="walkinForm.email" type="email" class="input-field" placeholder="guest@email.com" />
                   </div>
                   <div>
-                    <label for="wi-phone" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Phone *</label>
+                    <label for="wi-phone" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">
+                    Phone <span class="text-mist/60">(optional)</span>
+                  </label>
                     <div class="flex items-stretch w-full bg-graphite border border-iron rounded-sm focus-within:border-gold transition-colors">
                       <span class="flex items-center px-3 sm:px-4 text-sm sm:text-base text-mist border-r border-iron select-none" aria-hidden="true">+63</span>
                       <input
@@ -2607,23 +2923,73 @@ onMounted(async () => {
               </button>
             </div>
 
-            <!-- Status counts -->
-            <div v-if="paymentsSummary" class="flex flex-wrap gap-1.5 sm:gap-2 mb-4 sm:mb-6">
-              <span class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border border-yellow-400/30 text-yellow-400 bg-yellow-400/5">
+            <!-- Status filters -->
+            <div v-if="paymentsSummary" class="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-4 sm:mb-6">
+              <button
+                type="button"
+                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                :class="paymentsStatusFilter === 'all' ? 'border-gold text-gold bg-gold/10' : 'border-iron text-mist hover:border-gold/50'"
+                @click="paymentsStatusFilter = 'all'"
+              >
+                All {{ paymentsSummary.total }}
+              </button>
+              <button
+                type="button"
+                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                :class="paymentsStatusFilter === 'pending' ? 'border-yellow-400 text-yellow-400 bg-yellow-400/10' : 'border-yellow-400/30 text-yellow-400 bg-yellow-400/5 hover:border-yellow-400/60'"
+                @click="setPaymentsStatusFilter('pending')"
+              >
                 Pending {{ paymentsSummary.pending }}
-              </span>
-              <span class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border border-orange-400/30 text-orange-400 bg-orange-400/5">
+              </button>
+              <button
+                type="button"
+                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                :class="paymentsStatusFilter === 'partial' ? 'border-orange-400 text-orange-400 bg-orange-400/10' : 'border-orange-400/30 text-orange-400 bg-orange-400/5 hover:border-orange-400/60'"
+                @click="setPaymentsStatusFilter('partial')"
+              >
                 Partial {{ paymentsSummary.partial }}
-              </span>
-              <span class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border border-green-400/30 text-green-400 bg-green-400/5">
+              </button>
+              <button
+                type="button"
+                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                :class="paymentsStatusFilter === 'approved' ? 'border-green-400 text-green-400 bg-green-400/10' : 'border-green-400/30 text-green-400 bg-green-400/5 hover:border-green-400/60'"
+                @click="setPaymentsStatusFilter('approved')"
+              >
                 Approved {{ paymentsSummary.approved }}
-              </span>
-              <span class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border border-red-400/30 text-red-400 bg-red-400/5">
+              </button>
+              <button
+                type="button"
+                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                :class="paymentsStatusFilter === 'rejected' ? 'border-red-400 text-red-400 bg-red-400/10' : 'border-red-400/30 text-red-400 bg-red-400/5 hover:border-red-400/60'"
+                @click="setPaymentsStatusFilter('rejected')"
+              >
                 Rejected {{ paymentsSummary.rejected }}
-              </span>
-              <span class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border border-purple-400/30 text-purple-400 bg-purple-400/5">
+              </button>
+              <button
+                type="button"
+                class="px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider border transition-colors"
+                :class="paymentsStatusFilter === 'history' ? 'border-purple-400 text-purple-400 bg-purple-400/10' : 'border-purple-400/30 text-purple-400 bg-purple-400/5 hover:border-purple-400/60'"
+                @click="setPaymentsStatusFilter('history')"
+              >
                 History {{ paymentsSummary.history }}
-              </span>
+              </button>
+              <button
+                v-if="paymentsStatusFilter !== 'all' || paymentsSearch"
+                type="button"
+                class="ml-auto text-[9px] sm:text-[10px] uppercase tracking-wider text-mist hover:text-cream transition-colors"
+                @click="clearPaymentsFilters"
+              >
+                Clear filters
+              </button>
+            </div>
+
+            <div class="mb-4 sm:mb-6">
+              <input
+                v-model="paymentsSearch"
+                type="search"
+                class="input-field"
+                placeholder="Search client by name…"
+              />
             </div>
 
             <div v-if="paymentsLoading" class="text-center py-12">
@@ -2636,15 +3002,27 @@ onMounted(async () => {
               </div>
             </div>
 
-            <div v-else-if="paymentsList.length === 0" class="text-center py-12">
+            <div v-else-if="filteredPayments.length === 0" class="text-center py-12">
               <div class="text-4xl sm:text-5xl mb-3">💳</div>
-              <p class="text-cream text-sm sm:text-base font-medium">No payments found.</p>
-              <p class="text-mist text-[10px] sm:text-xs mt-1">Recorded transactions and website submissions will appear here.</p>
+              <p class="text-cream text-sm sm:text-base font-medium">
+                {{ paymentsSearch ? 'No payments match your search.' : paymentsStatusFilter === 'all' ? 'No payments found.' : `No ${paymentsStatusFilter} payments found.` }}
+              </p>
+              <p class="text-mist text-[10px] sm:text-xs mt-1">
+                {{ paymentsSearch ? 'Try a different name.' : paymentsStatusFilter === 'all' ? 'Recorded transactions and website submissions will appear here.' : 'Try a different status filter.' }}
+              </p>
+              <button
+                v-if="paymentsStatusFilter !== 'all' || paymentsSearch"
+                type="button"
+                class="btn-outline mt-4 text-[10px] sm:text-xs px-3 py-1.5"
+                @click="clearPaymentsFilters"
+              >
+                Show all payments
+              </button>
             </div>
 
             <div v-else class="space-y-3 sm:space-y-4">
               <div
-                v-for="payment in paymentsList"
+                v-for="payment in filteredPayments"
                 :key="payment.id"
                 class="border border-iron rounded-sm overflow-hidden"
               >

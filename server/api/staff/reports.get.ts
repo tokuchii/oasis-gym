@@ -1,4 +1,4 @@
-import type { WalkinPass } from '~/types/walkin'
+import { getPlanSessions, type ClientSession, type SessionUsage, type WalkinPass } from '~/types/walkin'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { getVisitDateManila } from '~/server/utils/walkin'
@@ -59,6 +59,8 @@ export default defineEventHandler(async (event) => {
     { data: payments, error: payError },
     { data: allPassDates },
     { data: allPaymentDates },
+    { data: sessionRows },
+    { data: usageRows },
   ] = await Promise.all([
     supabase
       .from('walkin_passes')
@@ -74,6 +76,13 @@ export default defineEventHandler(async (event) => {
       .order('created_at', { ascending: false }),
     supabase.from('walkin_passes').select('visit_date').limit(5000),
     supabase.from('membership_payments').select('created_at').limit(5000),
+    supabase.from('client_sessions').select('*').eq('removed', false).limit(5000),
+    supabase
+      .from('client_session_usage')
+      .select('*')
+      .gte('used_date', dateFrom)
+      .lte('used_date', dateTo)
+      .limit(5000),
   ])
 
   if (passError) {
@@ -117,6 +126,94 @@ export default defineEventHandler(async (event) => {
     .reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0)
   const totalRevenue = walkinRevenue + membershipRevenue
   const uniquePhones = new Set(serialized.map((p) => p.phone)).size
+
+  const sessions = ((sessionRows ?? []) as ClientSession[]).filter(
+    (session) => session.plan === 'weekly' || session.plan === 'monthly',
+  )
+  const usage = ((usageRows ?? []) as SessionUsage[]).filter((row) => row.plan !== 'daily')
+  const totalFor = (session: ClientSession) => getPlanSessions(session.plan)
+  const activeSessions = sessions.filter(
+    (s) => s.end_date >= today
+      && s.sessions_used < totalFor(s)
+      && (s.status === 'active' || s.status === 'completed'),
+  )
+  const completedSessions = sessions.filter((s) => s.status === 'completed' && s.sessions_used >= totalFor(s))
+  const expiredSessions = sessions.filter((s) => s.status === 'expired' || (s.end_date < today && s.status !== 'completed'))
+  const sessionsRemaining = activeSessions.reduce(
+    (sum, s) => sum + Math.max(0, totalFor(s) - s.sessions_used),
+    0,
+  )
+
+  const sessionAlerts: {
+    id: string
+    fullName: string
+    email: string
+    phone: string
+    plan: string
+    sessionsUsed: number
+    totalSessions: number
+    sessionsRemaining: number
+    endDate: string
+    type: 'low' | 'expired'
+  }[] = []
+
+  for (const session of sessions) {
+    const expectedTotal = totalFor(session)
+    if (session.sessions_used >= expectedTotal) continue
+    const remaining = Math.max(0, expectedTotal - session.sessions_used)
+    const expired = session.status === 'expired' || session.end_date < today
+    if (!expired && remaining > 2) continue
+    sessionAlerts.push({
+      id: session.id,
+      fullName: session.client_name,
+      email: session.client_email,
+      phone: session.client_phone,
+      plan: session.plan,
+      sessionsUsed: session.sessions_used,
+      totalSessions: expectedTotal,
+      sessionsRemaining: remaining,
+      endDate: session.end_date,
+      type: expired ? 'expired' : 'low',
+    })
+  }
+
+  sessionAlerts.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'expired' ? -1 : 1
+    return a.sessionsRemaining - b.sessionsRemaining
+  })
+
+  sessionAlerts.splice(50)
+
+  const planSessions = sessions.map((session) => {
+    const totalSessions = totalFor(session)
+    const sessionsRemaining = Math.max(0, totalSessions - session.sessions_used)
+    const expired = session.status === 'expired' || (session.end_date < today && session.status !== 'completed')
+    const status: 'active' | 'completed' | 'expired' = session.status === 'completed'
+      ? 'completed'
+      : expired ? 'expired' : 'active'
+
+    return {
+      id: session.id,
+      fullName: session.client_name,
+      email: session.client_email,
+      phone: session.client_phone,
+      plan: session.plan,
+      customerType: session.customer_type,
+      sessionsUsed: session.sessions_used,
+      totalSessions,
+      sessionsRemaining,
+      startDate: session.start_date,
+      endDate: session.end_date,
+      status,
+    }
+  }).sort((a, b) => {
+    const rank = { active: 0, expired: 1, completed: 2 }
+    if (rank[a.status] !== rank[b.status]) return rank[a.status] - rank[b.status]
+    if (a.status === 'active') {
+      return a.sessionsRemaining - b.sessionsRemaining || a.endDate.localeCompare(b.endDate)
+    }
+    return b.endDate.localeCompare(a.endDate)
+  })
 
   const dailyWalkinRevenue: Record<string, number> = {}
   const dailyMembershipRevenue: Record<string, number> = {}
@@ -223,6 +320,8 @@ export default defineEventHandler(async (event) => {
   return {
     visits: serialized,
     availableDates,
+    planSessions,
+    sessionAlerts,
     summary: {
       totalVisits,
       checkedOut,
@@ -230,6 +329,11 @@ export default defineEventHandler(async (event) => {
       walkinRevenue,
       membershipRevenue,
       uniqueMembers: uniquePhones,
+      sessionsUsedInPeriod: usage.length,
+      activePlans: activeSessions.length,
+      sessionsRemaining,
+      completedPlans: completedSessions.length,
+      expiredPlans: expiredSessions.length,
       dateFrom,
       dateTo,
       period,

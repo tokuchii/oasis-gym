@@ -58,7 +58,19 @@ export default defineEventHandler(async (event) => {
     isRemoved: removedEmailSet.has(row.email as string),
   })
 
-  const allPayments = (allData ?? []).map(mapRow)
+  const seenClients = new Set<string>()
+  const allPayments = (allData ?? [])
+    .map(mapRow)
+    .filter((p) => {
+      const key = [
+        String(p.fullName ?? '').trim().toLowerCase(),
+        String(p.phone ?? '').replace(/\D/g, ''),
+        String(p.email ?? '').trim().toLowerCase(),
+      ].join('|')
+      if (seenClients.has(key)) return false
+      seenClients.add(key)
+      return true
+    })
 
   const summary = {
     total: allPayments.length,

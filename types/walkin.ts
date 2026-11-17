@@ -99,6 +99,32 @@ export interface ClientSession {
   note: string | null
   paid_amount: number | null
   created_at: string
+  low_session_reminder_sent?: boolean
+  completion_notified?: boolean
+  completed_at?: string | null
+}
+
+export interface SessionUsage {
+  id: string
+  session_id: string | null
+  client_name: string
+  client_email: string | null
+  client_phone: string
+  plan: MembershipPlanId
+  used_at: string
+  used_date: string
+  pass_code: string | null
+  staff: string | null
+}
+
+export interface ClientSessionInfo {
+  plan: MembershipPlanId
+  totalSessions: number
+  sessionsUsed: number
+  sessionsRemaining: number
+  status: 'active' | 'completed' | 'expired'
+  startDate: string
+  endDate: string
 }
 
 export const PLAN_RATES: Record<CustomerType, Record<MembershipPlanId, number>> = {

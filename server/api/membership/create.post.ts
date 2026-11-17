@@ -1,10 +1,11 @@
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
+import { createPaidSession } from '~/server/utils/sessions'
+import { saveMembershipPayment } from '~/server/utils/membership-payments'
 import { getVisitDateManila, normalizePhone, sanitizeText, validateEmail, validatePhone } from '~/server/utils/walkin'
 import {
   getPlanDays,
   getPlanRate,
-  getPlanSessions,
   planToMemberStatus,
   INSTRUCTOR_FEE,
   MEMBERSHIP_FEE,
@@ -82,13 +83,12 @@ export default defineEventHandler(async (event) => {
   const phone = normalizePhone(phoneRaw)
   const startDate = getVisitDateManila()
   const expiryDate = addDays(startDate, getPlanDays(plan))
-  const totalSessions = getPlanSessions(plan)
 
   const supabase = useSupabaseAdmin()
 
-  const { data: payment, error: paymentError } = await supabase
-    .from('membership_payments')
-    .insert({
+  let payment
+  try {
+    const saved = await saveMembershipPayment(supabase, {
       full_name: fullName,
       email: emailRaw,
       phone,
@@ -108,36 +108,23 @@ export default defineEventHandler(async (event) => {
       paid_amount: paidAmount,
       reminder_sent: false,
     })
-    .select('*')
-    .single()
-
-  if (paymentError || !payment) {
-    console.error('[Membership] Staff transaction insert error:', paymentError)
+    payment = saved.payment
+  } catch (err) {
+    console.error('[Membership] Staff transaction save error:', err)
     throw createError({ statusCode: 500, statusMessage: 'Failed to record transaction. Please try again.' })
   }
 
-  const { error: sessionError } = await supabase
-    .from('client_sessions')
-    .insert({
-      client_name: fullName,
-      client_email: emailRaw,
-      client_phone: phone,
-      coach_name: coach || null,
-      plan,
-      customer_type: customerType,
-      payment_id: payment.id,
-      total_sessions: totalSessions,
-      sessions_used: 0,
-      start_date: startDate,
-      end_date: expiryDate,
-      status: 'active',
-      note: note || `Membership recorded by staff (${plan} plan)`,
-      paid_amount: paidAmount,
-    })
-
-  if (sessionError) {
-    console.error('[Membership] Failed to create client session:', sessionError.message)
-  }
+  await createPaidSession(supabase, {
+    clientName: fullName,
+    clientEmail: emailRaw,
+    clientPhone: phone,
+    coachName: coach || null,
+    plan,
+    customerType,
+    paymentId: payment.id,
+    paidAmount: paidAmount,
+    note: note || `Membership recorded by staff (${plan} plan)`,
+  })
 
   if (memberId) {
     const { error: statusError } = await supabase

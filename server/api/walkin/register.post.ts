@@ -1,6 +1,8 @@
 import { generatePassCode } from '~/server/utils/pass-code'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
+import { ensureRegistrationSession } from '~/server/utils/sessions'
 import { checkRateLimit, getVisitDateManila, serializePass, validateWalkinPayload } from '~/server/utils/walkin'
+import type { CustomerType, MembershipPlanId } from '~/types/walkin'
 
 function likeEscape(value: string): string {
   return value.replace(/([%_\\])/g, '\\$1')
@@ -15,10 +17,24 @@ export default defineEventHandler(async (event) => {
   const supabase = useSupabaseAdmin()
   const visitDate = getVisitDateManila()
 
+  async function startPlanSession(pass: { full_name: string; email: string; phone: string; member_status: string; customer_type: string }) {
+    if (pass.member_status !== 'weekly' && pass.member_status !== 'monthly') return
+    await ensureRegistrationSession(supabase, {
+      clientName: pass.full_name,
+      clientEmail: pass.email,
+      clientPhone: pass.phone,
+      plan: pass.member_status as MembershipPlanId,
+      customerType: (pass.customer_type ?? 'member') as CustomerType,
+      note: `Created from registration (${pass.member_status} plan)`,
+    })
+  }
+
   const { data: existing, error: existingError } = await supabase
     .from('walkin_passes')
     .select('*')
     .eq('phone', payload.phone)
+    .ilike('full_name', likeEscape(payload.fullName))
+    .ilike('email', likeEscape(payload.email))
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -29,41 +45,7 @@ export default defineEventHandler(async (event) => {
   }
 
   if (existing && !existing.removed) {
-    return { duplicate: true, message: 'This phone number is already registered.' }
-  }
-
-  if (payload.email) {
-    const { data: emailExisting, error: emailError } = await supabase
-      .from('walkin_passes')
-      .select('id')
-      .ilike('email', likeEscape(payload.email))
-      .eq('removed', false)
-      .limit(1)
-      .maybeSingle()
-
-    if (emailError) {
-      console.error('[Walkin] Register email lookup error:', emailError)
-      throw createError({ statusCode: 500, statusMessage: 'Registration failed. Please try again.' })
-    }
-    if (emailExisting) {
-      throw createError({ statusCode: 409, statusMessage: 'This email is already registered to another walk-in.' })
-    }
-  }
-
-  const { data: nameExisting, error: nameError } = await supabase
-    .from('walkin_passes')
-    .select('id')
-    .ilike('full_name', likeEscape(payload.fullName))
-    .eq('removed', false)
-    .limit(1)
-    .maybeSingle()
-
-  if (nameError) {
-    console.error('[Walkin] Register name lookup error:', nameError)
-    throw createError({ statusCode: 500, statusMessage: 'Registration failed. Please try again.' })
-  }
-  if (nameExisting) {
-    throw createError({ statusCode: 409, statusMessage: 'This full name is already registered to another walk-in.' })
+    return { duplicate: true, message: 'This client is already registered with the same name, phone number, and email.' }
   }
 
   if (existing) {
@@ -85,6 +67,8 @@ export default defineEventHandler(async (event) => {
       console.error('[Walkin] Register restore error:', restoreError)
       throw createError({ statusCode: 500, statusMessage: 'Registration failed. Please try again.' })
     }
+
+    await startPlanSession(restored)
 
     return {
       ...serializePass(restored),
@@ -119,18 +103,6 @@ export default defineEventHandler(async (event) => {
     }
 
     if (error?.code === '23505') {
-      if (error.message?.includes('phone')) {
-        const { data: existingAgain } = await supabase
-          .from('walkin_passes')
-          .select('*')
-          .eq('phone', payload.phone)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-        if (existingAgain) {
-          return { duplicate: true, message: 'This phone number is already registered.' }
-        }
-      }
       passCode = generatePassCode()
       continue
     }
@@ -142,6 +114,8 @@ export default defineEventHandler(async (event) => {
   if (!inserted) {
     throw createError({ statusCode: 500, statusMessage: 'Failed to create day pass.' })
   }
+
+  await startPlanSession(inserted)
 
   const pass = serializePass(inserted)
 

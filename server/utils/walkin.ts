@@ -213,8 +213,10 @@ export function validateWalkinPayload(body: unknown) {
     if (emailErr) throw createError({ statusCode: 400, statusMessage: emailErr })
   }
 
-  const phoneErr = validatePhone(phoneRaw)
-  if (phoneErr) throw createError({ statusCode: 400, statusMessage: phoneErr })
+  if (phoneRaw.trim()) {
+    const phoneErr = validatePhone(phoneRaw)
+    if (phoneErr) throw createError({ statusCode: 400, statusMessage: phoneErr })
+  }
 
   if (emergencyContact && emergencyContact.length < 2) {
     throw createError({ statusCode: 400, statusMessage: 'Emergency contact must be at least 2 characters.' })
@@ -223,7 +225,14 @@ export function validateWalkinPayload(body: unknown) {
     throw createError({ statusCode: 400, statusMessage: 'Emergency contact is too long.' })
   }
 
-  return { fullName, email: emailRaw.trim().toLowerCase(), phone: normalizePhone(phoneRaw), emergencyContact, memberStatus, customerType }
+  return {
+    fullName,
+    email: emailRaw.trim().toLowerCase(),
+    phone: phoneRaw.trim() ? normalizePhone(phoneRaw) : '',
+    emergencyContact,
+    memberStatus,
+    customerType,
+  }
 }
 
 export function validateCoachPayload(body: unknown) {
