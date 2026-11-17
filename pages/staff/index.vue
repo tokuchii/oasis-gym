@@ -418,6 +418,7 @@ async function sendReminders() {
       method: 'POST',
     })
     toast.success(data.message)
+    await loadActivities()
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
     toast.error(fetchErr.data?.statusMessage ?? 'Failed to send reminders.')
@@ -436,6 +437,7 @@ async function sendSessionReminders() {
     })
     toast.success(data.message)
     await loadReports()
+    await loadActivities()
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
     toast.error(fetchErr.data?.statusMessage ?? 'Failed to send session reminders.')
@@ -530,6 +532,7 @@ async function login() {
     authenticated.value = true
     loginPassword.value = ''
     loadReports()
+    loadActivities()
   } catch (err: unknown) {
     const fetchErr = err as { data?: { statusMessage?: string } }
     loginError.value = fetchErr.data?.statusMessage ?? 'Login failed.'
@@ -1899,6 +1902,7 @@ onMounted(async () => {
   await checkSession()
   if (authenticated.value) {
     loadReports()
+    loadActivities()
   }
 })
 
