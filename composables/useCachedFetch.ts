@@ -36,7 +36,11 @@ export function useCachedFetch() {
         const data = await api<T>(fullUrl(url), { params: opts.params })
         if (opts.cache) {
           const key = opts.params ? JSON.stringify(opts.params) : 'all'
-          await put(opts.cache.store, { id: key, data, fetchedAt: Date.now() })
+          try {
+            await put(opts.cache.store, { id: key, data, fetchedAt: Date.now() })
+          } catch (cacheError) {
+            console.warn('[Cache] Failed to save', opts.cache.store, cacheError)
+          }
         }
         return data
       } catch (err) {

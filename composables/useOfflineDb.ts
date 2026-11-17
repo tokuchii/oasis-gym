@@ -1,5 +1,5 @@
 const DB_NAME = 'oasis-offline'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -22,6 +22,9 @@ function openDB(): Promise<IDBDatabase> {
         db.deleteObjectStore('reports')
       }
       db.createObjectStore('reports', { keyPath: 'id' })
+      if (!db.objectStoreNames.contains('activity')) {
+        db.createObjectStore('activity', { keyPath: 'id' })
+      }
       if (!db.objectStoreNames.contains('writeQueue')) {
         const store = db.createObjectStore('writeQueue', { keyPath: 'id', autoIncrement: true })
         store.createIndex('createdAt', 'createdAt')
