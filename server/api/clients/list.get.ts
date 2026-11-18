@@ -23,6 +23,7 @@ export default defineEventHandler(async (event) => {
     .from('membership_payments')
     .select('*')
     .eq('status', 'approved')
+    .neq('plan', 'daily')
 
   if (approvedPayments) {
     for (const payment of approvedPayments) {

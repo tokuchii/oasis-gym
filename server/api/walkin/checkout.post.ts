@@ -5,6 +5,7 @@ import { isValidPassCodeFormat, normalizePassCode } from '~/server/utils/pass-co
 import { useSupabaseAdmin } from '~/server/utils/supabase'
 import { ensureRegistrationSession, getClientSessions, logSessionUsage } from '~/server/utils/sessions'
 import { sendSessionCompletedEmail, sendSessionLowReminder } from '~/server/utils/email'
+import { recordCheckoutPayment } from '~/server/utils/membership-payments'
 import { getVisitDateManila, serializePass } from '~/server/utils/walkin'
 import { getPlanSessions, PLAN_RATES } from '~/types/walkin'
 
@@ -118,6 +119,22 @@ export default defineEventHandler(async (event) => {
   if (updateError || !updated) {
     console.error('[Walkin] Checkout update error:', updateError)
     throw createError({ statusCode: 500, statusMessage: 'Failed to check out. Please try again.' })
+  }
+
+  if (!isPlanMember && paymentAmount > 0) {
+    try {
+      await recordCheckoutPayment(supabase, {
+        fullName: data.full_name,
+        email: data.email ?? '',
+        phone: data.phone,
+        customerType: (data.customer_type ?? 'non_member') as CustomerType,
+        amount: paymentAmount,
+        visitDate: today,
+        reference: passCode,
+      })
+    } catch (err) {
+      console.error('[Walkin] Failed to record checkout payment:', err)
+    }
   }
 
   let sessionsRemaining: number | null = null

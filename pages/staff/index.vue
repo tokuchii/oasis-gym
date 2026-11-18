@@ -14,12 +14,14 @@ import {
 } from '~/types/walkin'
 import { useToast } from '~/composables/useToast'
 import { useCachedFetch } from '~/composables/useCachedFetch'
+import { useDataVersion } from '~/composables/useDataVersion'
 import { useOnlineStatus } from '~/composables/useOnlineStatus'
 import { useOfflineDb } from '~/composables/useOfflineDb'
 import { getApiBase } from '~/composables/useApiBase'
 
 const toast = useToast()
 const { cachedGet, cachedPost } = useCachedFetch()
+const { dataVersion } = useDataVersion()
 const { isOnline } = useOnlineStatus()
 const { put: dbPut, get: dbGet } = useOfflineDb()
 
@@ -308,19 +310,12 @@ const ACTIVITY_FILTERS: { id: ActivityCategory | 'all'; label: string }[] = [
   { id: 'reminder', label: 'Reminder' },
 ]
 
-const ACTIVITY_PAGE_SIZE = 5
-
 const activities = ref<ActivityItem[]>([])
 const activitiesLoading = ref(false)
 const activitiesError = ref('')
 const showActivityModal = ref(false)
 const activityFilter = ref<ActivityCategory | 'all'>('all')
 const activitySearch = ref('')
-const activityLimit = ref(ACTIVITY_PAGE_SIZE)
-
-watch([activityFilter, activitySearch], () => {
-  activityLimit.value = ACTIVITY_PAGE_SIZE
-})
 
 const activityCounts = computed(() => {
   const counts: Record<string, number> = { all: activities.value.length }
@@ -348,16 +343,20 @@ const filteredActivities = computed(() => {
   })
 })
 
-async function loadActivities() {
-  activitiesError.value = ''
-  activitiesLoading.value = true
+async function loadActivities(silent = false) {
+  if (!silent) {
+    activitiesError.value = ''
+    activitiesLoading.value = true
+  }
   try {
     const data = await cachedGet<{ activities: ActivityItem[]; error?: string }>('/api/staff/activity', {
       cache: { store: 'activity', label: 'Activity log' },
     })
     activities.value = data.activities ?? []
     if (data.error) activitiesError.value = data.error
+    else if (silent) activitiesError.value = ''
   } catch (err: unknown) {
+    if (silent) return
     const fetchErr = err as { statusCode?: number; statusMessage?: string; data?: { statusMessage?: string }; message?: string }
     const message = fetchErr.data?.statusMessage ?? fetchErr.statusMessage
     if (message) {
@@ -368,7 +367,7 @@ async function loadActivities() {
       activitiesError.value = 'Failed to load activity log.'
     }
   } finally {
-    activitiesLoading.value = false
+    if (!silent) activitiesLoading.value = false
   }
 }
 
@@ -376,7 +375,6 @@ function openActivityModal() {
   showActivityModal.value = true
   activityFilter.value = 'all'
   activitySearch.value = ''
-  activityLimit.value = ACTIVITY_PAGE_SIZE
   loadActivities()
 }
 
@@ -491,9 +489,9 @@ function getSpecialtyString(): string {
   return selected.join(', ')
 }
 
-async function loadOverview() {
+async function loadOverview(silent = false) {
   try {
-    await Promise.all([loadPayments(), loadCoaches()])
+    await Promise.all([loadPayments(silent), loadCoaches(silent)])
   } catch {}
 }
 
@@ -654,11 +652,13 @@ async function submitWalkin() {
   }
 }
 
-async function loadMembers() {
+async function loadMembers(silent = false) {
   const requestId = ++membersRequestId.value
-  membersLoading.value = true
-  membersError.value = ''
-  membersLimit.value = 5
+  if (!silent) {
+    membersLoading.value = true
+    membersError.value = ''
+    membersLimit.value = 5
+  }
   try {
     const path = membersIncludeCheckedIn.value ? '/api/walkin/list?all=1' : '/api/walkin/list'
     const data = await cachedGet<{ members: PassResult[] }>(path, {
@@ -666,13 +666,15 @@ async function loadMembers() {
     })
     if (requestId !== membersRequestId.value) return
     membersList.value = data.members
+    membersError.value = ''
   } catch (err: unknown) {
     if (requestId !== membersRequestId.value) return
+    if (silent) return
     const fetchErr = err as { data?: { statusMessage?: string } }
     membersError.value = fetchErr.data?.statusMessage ?? (err instanceof Error ? err.message : 'Failed to load members.')
     membersList.value = []
   } finally {
-    if (requestId === membersRequestId.value) membersLoading.value = false
+    if (!silent && requestId === membersRequestId.value) membersLoading.value = false
   }
 }
 
@@ -687,7 +689,6 @@ function resetTabState(tab: StaffTab) {
     showActivityModal.value = false
     activityFilter.value = 'all'
     activitySearch.value = ''
-    activityLimit.value = ACTIVITY_PAGE_SIZE
     activitiesError.value = ''
   } else if (tab === 'checkout') {
     selectedPass.value = null
@@ -1016,12 +1017,11 @@ const txError = ref('')
 
 const txMemberMatches = computed(() => {
   const query = txMemberSearch.value.trim().toLowerCase()
-  if (!query) return txMembers.value.slice(0, 6)
+  if (!query) return txMembers.value
   return txMembers.value
     .filter((m) =>
       m.fullName.toLowerCase().includes(query) || m.phone.replace(/\s+/g, '').includes(query.replace(/\s+/g, '')),
     )
-    .slice(0, 6)
 })
 
 const txExpiry = computed(() => {
@@ -1079,7 +1079,6 @@ function clearTxMember() {
 }
 
 async function loadTxMembers() {
-  if (txMembers.value.length) return
   try {
     const data = await cachedGet<{ members: PassResult[] }>('/api/walkin/list', {
       params: { all: '1' },
@@ -1180,19 +1179,22 @@ async function openReceiptModal(url: string, name: string) {
   }
 }
 
-async function loadPayments() {
-  paymentsError.value = ''
-  paymentsLoading.value = true
+async function loadPayments(silent = false) {
+  if (!silent) {
+    paymentsError.value = ''
+    paymentsLoading.value = true
+  }
   try {
     const data = await cachedGet<{ payments: MembershipPayment[]; summary: PaymentSummary }>('/api/membership/list', {
       cache: { store: 'clients', label: 'Payments' },
     })
     paymentsList.value = data.payments
     paymentsSummary.value = data.summary
+    if (silent) paymentsError.value = ''
   } catch {
-    if (isOnline.value) toast.error('Failed to load payments.')
+    if (!silent && isOnline.value) toast.error('Failed to load payments.')
   } finally {
-    paymentsLoading.value = false
+    if (!silent) paymentsLoading.value = false
   }
 }
 
@@ -1317,11 +1319,13 @@ function setReportPeriod(period: 'day' | 'week' | 'month' | 'year') {
   loadReports()
 }
 
-async function loadReports() {
-  reportError.value = ''
-  reportLoading.value = true
-  reportData.value = null
-  visitLogLimit.value = 5
+async function loadReports(silent = false) {
+  if (!silent) {
+    reportError.value = ''
+    reportLoading.value = true
+    reportData.value = null
+    visitLogLimit.value = 5
+  }
 
   try {
     const params: Record<string, string> = { period: reportPeriod.value }
@@ -1332,22 +1336,25 @@ async function loadReports() {
     reportData.value = data
     reportGeneratedAt.value = new Date().toISOString()
   } catch {
-    if (isOnline.value) toast.error('Failed to load reports.')
+    if (!silent && isOnline.value) toast.error('Failed to load reports.')
   } finally {
-    reportLoading.value = false
-    loadOverview()
+    if (!silent) {
+      reportLoading.value = false
+    }
+    loadOverview(silent)
   }
 }
 
-async function loadCoaches() {
-  coachError.value = ''
+async function loadCoaches(silent = false) {
+  if (!silent) coachError.value = ''
   try {
     const data = await cachedGet<{ coaches: CoachItem[] }>('/api/coaches/list', {
       cache: { store: 'coaches', label: 'Coaches' },
     })
     coachesList.value = data.coaches
+    if (silent) coachError.value = ''
   } catch {
-    if (isOnline.value) toast.error('Failed to load coaches.')
+    if (!silent && isOnline.value) toast.error('Failed to load coaches.')
   }
 }
 
@@ -1907,12 +1914,57 @@ async function exportRange() {
   }
 }
 
+const AUTO_REFRESH_MS = 10000
+let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
+let commitRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let refreshingData = false
+
+async function refreshActiveTab(silent = true) {
+  if (!authenticated.value || !isOnline.value || refreshingData) return
+  if (import.meta.client && document.hidden) return
+
+  refreshingData = true
+  try {
+    if (activeTab.value === 'reports') {
+      await Promise.all([loadReports(silent), loadActivities(silent)])
+    } else if (activeTab.value === 'checkout' || activeTab.value === 'walkin') {
+      await loadMembers(silent)
+    } else if (activeTab.value === 'payment') {
+      await Promise.all([loadPayments(silent), loadTxMembers()])
+    } else if (activeTab.value === 'coaches') {
+      await loadCoaches(silent)
+    }
+  } finally {
+    refreshingData = false
+  }
+}
+
+function refreshOnVisible() {
+  if (!document.hidden) refreshActiveTab(true)
+}
+
+watch(dataVersion, () => {
+  if (!authenticated.value) return
+  if (commitRefreshTimer) clearTimeout(commitRefreshTimer)
+  commitRefreshTimer = setTimeout(() => { refreshActiveTab(true) }, 250)
+})
+
 onMounted(async () => {
   await checkSession()
   if (authenticated.value) {
     loadReports()
     loadActivities()
   }
+  autoRefreshTimer = setInterval(() => { refreshActiveTab(true) }, AUTO_REFRESH_MS)
+  window.addEventListener('focus', refreshOnVisible)
+  document.addEventListener('visibilitychange', refreshOnVisible)
+})
+
+onUnmounted(() => {
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer)
+  if (commitRefreshTimer) clearTimeout(commitRefreshTimer)
+  window.removeEventListener('focus', refreshOnVisible)
+  document.removeEventListener('visibilitychange', refreshOnVisible)
 })
 
 </script>
@@ -2341,9 +2393,9 @@ onMounted(async () => {
                 <div v-else-if="!activities.length" class="text-center py-10">
                   <p class="text-mist text-xs sm:text-sm">No activity recorded yet.</p>
                 </div>
-                <ul v-else class="divide-y divide-iron/40">
+                <ul v-else class="divide-y divide-iron/40 max-h-80 overflow-y-auto">
                   <li
-                    v-for="activity in activities.slice(0, ACTIVITY_PAGE_SIZE)"
+                    v-for="activity in activities"
                     :key="activity.id"
                     class="flex items-start justify-between gap-3 px-4 py-3"
                   >
@@ -2368,11 +2420,6 @@ onMounted(async () => {
                     </div>
                   </li>
                 </ul>
-                <div v-if="activities.length > ACTIVITY_PAGE_SIZE" class="border-t border-iron px-4 py-2.5 text-center">
-                  <button type="button" class="text-gold text-[10px] sm:text-xs uppercase tracking-wider hover:underline" @click="openActivityModal">
-                    See More ({{ activities.length - ACTIVITY_PAGE_SIZE }})
-                  </button>
-                </div>
               </div>
 
               <!-- Activity Log Modal -->
@@ -2393,14 +2440,6 @@ onMounted(async () => {
                           {{ filteredActivities.length }} of {{ activities.length }} activities
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        class="text-mist hover:text-cream text-xl leading-none shrink-0"
-                        aria-label="Close"
-                        @click="showActivityModal = false"
-                      >
-                        &times;
-                      </button>
                     </div>
 
                     <div class="px-4 sm:px-6 py-3 border-b border-iron shrink-0 space-y-2">
@@ -2434,7 +2473,7 @@ onMounted(async () => {
                       </p>
                       <ul v-else class="divide-y divide-iron/40">
                         <li
-                          v-for="activity in filteredActivities.slice(0, activityLimit)"
+                          v-for="activity in filteredActivities"
                           :key="activity.id"
                           class="flex items-start justify-between gap-3 py-3"
                         >
@@ -2463,24 +2502,6 @@ onMounted(async () => {
                           </div>
                         </li>
                       </ul>
-                      <div v-if="filteredActivities.length > activityLimit" class="text-center pt-3">
-                        <button
-                          type="button"
-                          class="text-gold text-[10px] sm:text-xs uppercase tracking-wider hover:underline"
-                          @click="activityLimit += ACTIVITY_PAGE_SIZE"
-                        >
-                          See More ({{ filteredActivities.length - activityLimit }} remaining)
-                        </button>
-                      </div>
-                      <div v-if="activityLimit > ACTIVITY_PAGE_SIZE && filteredActivities.length > ACTIVITY_PAGE_SIZE" class="text-center pt-2">
-                        <button
-                          type="button"
-                          class="text-mist text-[10px] sm:text-[11px] uppercase tracking-wider hover:text-cream"
-                          @click="activityLimit = ACTIVITY_PAGE_SIZE"
-                        >
-                          See Less
-                        </button>
-                      </div>
                     </div>
 
                     <div class="px-4 sm:px-6 py-3 border-t border-iron shrink-0 flex items-center justify-between gap-2">

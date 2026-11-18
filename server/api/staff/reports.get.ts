@@ -151,7 +151,8 @@ export default defineEventHandler(async (event) => {
   const totalVisits = serialized.length
   const checkedOut = serialized.filter((p) => p.status === 'checked_in').length
   const walkinRevenue = serialized.filter((p) => p.status === 'checked_in').reduce((sum, p) => sum + (p.paymentAmount ?? 0), 0)
-  const membershipRevenue = membershipPayments
+  const planPayments = membershipPayments.filter((p) => p.plan !== 'daily')
+  const membershipRevenue = planPayments
     .filter((p) => p.status === 'approved' || p.status === 'partial')
     .reduce((sum, p) => sum + (p.paidAmount ?? p.amount), 0)
   const totalRevenue = walkinRevenue + membershipRevenue
@@ -258,7 +259,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  for (const p of membershipPayments) {
+  for (const p of planPayments) {
     if (p.status !== 'approved' && p.status !== 'partial') continue
     const dateKey = p.createdAt.slice(0, 10)
     dailyMembershipRevenue[dateKey] = (dailyMembershipRevenue[dateKey] ?? 0) + (p.paidAmount ?? p.amount)

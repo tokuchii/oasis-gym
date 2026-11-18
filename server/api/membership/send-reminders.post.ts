@@ -18,6 +18,7 @@ export default defineEventHandler(async (event) => {
     .select('*')
     .eq('status', 'approved')
     .eq('reminder_sent', false)
+    .neq('plan', 'daily')
     .lte('expiry_date', threeDaysLaterStr)
     .gte('expiry_date', today)
 

@@ -1,3 +1,4 @@
+import { useDataVersion } from './useDataVersion'
 import { useOfflineDb } from './useOfflineDb'
 import { useOnlineStatus } from './useOnlineStatus'
 import { useWriteQueue } from './useWriteQueue'
@@ -23,6 +24,7 @@ export function useCachedFetch() {
   const { isOnline } = useOnlineStatus()
   const { put, get, clear } = useOfflineDb()
   const { enqueue } = useWriteQueue()
+  const { bumpDataVersion } = useDataVersion()
 
   function fullUrl(url: string): string {
     const base = getApiBase()
@@ -67,6 +69,7 @@ export function useCachedFetch() {
             await clear(store)
           }
         }
+        bumpDataVersion()
         return data
       } catch (err) {
         if (isNetworkError(err)) {

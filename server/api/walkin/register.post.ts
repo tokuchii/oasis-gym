@@ -1,9 +1,10 @@
 import { generatePassCode } from '~/server/utils/pass-code'
 import { logActivity } from '~/server/utils/activity'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
-import { ensureRegistrationSession } from '~/server/utils/sessions'
+import { saveMembershipPayment } from '~/server/utils/membership-payments'
+import { addPlanDays, ensureRegistrationSession } from '~/server/utils/sessions'
 import { checkRateLimit, getVisitDateManila, serializePass, validateWalkinPayload } from '~/server/utils/walkin'
-import type { CustomerType, MembershipPlanId } from '~/types/walkin'
+import { getPlanDays, getPlanRate, type CustomerType, type MembershipPlanId } from '~/types/walkin'
 
 function likeEscape(value: string): string {
   return value.replace(/([%_\\])/g, '\\$1')
@@ -28,6 +29,40 @@ export default defineEventHandler(async (event) => {
       customerType: (pass.customer_type ?? 'member') as CustomerType,
       note: `Created from registration (${pass.member_status} plan)`,
     })
+  }
+
+  async function recordRegistrationPayment(pass: { full_name: string; email: string; phone: string; member_status: string; customer_type: string }) {
+    const plan: MembershipPlanId = pass.member_status === 'weekly' || pass.member_status === 'monthly'
+      ? pass.member_status
+      : 'daily'
+    const customerType = (pass.customer_type ?? 'non_member') as CustomerType
+    const amount = getPlanRate(plan, customerType)
+    if (!amount || amount <= 0) return
+
+    try {
+      await saveMembershipPayment(supabase, {
+        full_name: pass.full_name,
+        email: pass.email,
+        phone: pass.phone,
+        plan,
+        customer_type: customerType,
+        plan_price: amount,
+        membership_fee: 0,
+        instructor_fee: 0,
+        coach: null,
+        payment_method: 'cash',
+        reference_no: null,
+        amount,
+        receipt_url: null,
+        status: 'approved',
+        expiry_date: plan === 'daily' ? visitDate : addPlanDays(visitDate, getPlanDays(plan)),
+        note: `Recorded at registration (${pass.member_status} plan)`,
+        paid_amount: amount,
+        reminder_sent: true,
+      })
+    } catch (err) {
+      console.error('[Walkin] Failed to record registration payment:', err)
+    }
   }
 
   const { data: existing, error: existingError } = await supabase
@@ -129,6 +164,7 @@ export default defineEventHandler(async (event) => {
   }
 
   await startPlanSession(inserted)
+  await recordRegistrationPayment(inserted)
 
   await logActivity(supabase, {
     category: 'register',
