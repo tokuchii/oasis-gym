@@ -150,6 +150,51 @@ type StaffTab = 'reports' | 'checkout' | 'walkin' | 'payment' | 'coaches'
 
 const activeTab = ref<StaffTab>('reports')
 
+const MODULES: { id: StaffTab; label: string; description: string; icon: string }[] = [
+  { id: 'reports', label: 'Reports', description: 'Business analytics, revenue, sessions, and the activity log.', icon: 'M4 19V5m0 14h16M8 16v-4m4 4V8m4 8v-6' },
+  { id: 'checkout', label: 'Check-out', description: 'Check in registered clients and manage pending passes.', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
+  { id: 'walkin', label: 'Register', description: 'Register new walk-in members and clients.', icon: 'M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z' },
+  { id: 'payment', label: 'Payment', description: 'Record membership transactions and manage receipts.', icon: 'M3 10h18M7 15h3m4 0h3M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2z' },
+  { id: 'coaches', label: 'Coaches', description: 'Add, edit, and manage coach profiles.', icon: 'M17 20h5v-2a3 3 0 00-5.36-1.86M17 20H7m10 0v-2c0-.66-.13-1.29-.36-1.86M7 20H2v-2a3 3 0 015.36-1.86M7 20v-2c0-.66.13-1.29.36-1.86m0 0a5 5 0 019.28 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
+]
+
+const moduleOpen = ref(false)
+const showPdfPreview = ref(false)
+const pdfPreviewUrl = ref('')
+const pdfPreviewFileName = ref('')
+const pdfPreviewIframe = ref<HTMLIFrameElement | null>(null)
+const pdfPreviewCloseBtn = ref<HTMLButtonElement | null>(null)
+const exportPdfButton = ref<HTMLButtonElement | null>(null)
+
+const activeModule = computed(() => MODULES.find((module) => module.id === activeTab.value) ?? MODULES[0]!)
+
+function openModule(tab: StaffTab) {
+  if (activeTab.value !== tab) activeTab.value = tab
+  else loadModule(tab)
+  moduleOpen.value = true
+}
+
+function closeModule() {
+  if (!moduleOpen.value) return
+  resetTabState(activeTab.value)
+  moduleOpen.value = false
+}
+
+function handleModuleKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  if (showPdfPreview.value) {
+    event.preventDefault()
+    closePdfPreview()
+    return
+  }
+  if (moduleOpen.value) closeModule()
+}
+
+watch(moduleOpen, (open) => {
+  if (!import.meta.client) return
+  document.body.style.overflow = open ? 'hidden' : ''
+})
+
 const walkinForm = reactive({
   fullName: '',
   email: '',
@@ -314,6 +359,7 @@ const activities = ref<ActivityItem[]>([])
 const activitiesLoading = ref(false)
 const activitiesError = ref('')
 const showActivityModal = ref(false)
+const showActivityLog = ref(false)
 const activityFilter = ref<ActivityCategory | 'all'>('all')
 const activitySearch = ref('')
 
@@ -409,6 +455,8 @@ const sortedVisits = computed(() => {
     return new Date(bTime).getTime() - new Date(aTime).getTime()
   })
 })
+
+const checkoutVisits = computed(() => sortedVisits.value.filter((visit) => visit.status === 'checked_in'))
 
 const reminderLoading = ref(false)
 const reminderMessage = ref('')
@@ -556,6 +604,7 @@ async function logout() {
 }
 
 function resetState() {
+  closePdfPreview()
   selectedPass.value = null
   membersList.value = []
   membersFilter.value = ''
@@ -570,6 +619,7 @@ function resetState() {
 }
 
 function closeTransactionModals() {
+  closePdfPreview()
   selectedPass.value = null
   showExportModal.value = false
   showActivityModal.value = false
@@ -687,9 +737,13 @@ function resetTabState(tab: StaffTab) {
     visitLogLimit.value = 5
     showAllCoaches.value = false
     showActivityModal.value = false
+    showActivityLog.value = false
     activityFilter.value = 'all'
     activitySearch.value = ''
     activitiesError.value = ''
+    showExportModal.value = false
+    exportError.value = ''
+    closePdfPreview()
   } else if (tab === 'checkout') {
     selectedPass.value = null
     checkinMessage.value = ''
@@ -748,9 +802,7 @@ function resetTabState(tab: StaffTab) {
   }
 }
 
-watch(activeTab, (tab, prevTab) => {
-  if (prevTab) resetTabState(prevTab)
-
+function loadModule(tab: StaffTab) {
   if (tab === 'reports') {
     loadReports()
     loadActivities()
@@ -762,6 +814,11 @@ watch(activeTab, (tab, prevTab) => {
     loadMembers()
   } else if (tab === 'payment') initPaymentTab()
   else if (tab === 'coaches') loadCoaches()
+}
+
+watch(activeTab, (tab, prevTab) => {
+  if (prevTab) resetTabState(prevTab)
+  loadModule(tab)
 })
 
 function syncCheckinFromPass(pass: PassResult) {
@@ -1011,6 +1068,7 @@ const txForm = reactive({
   note: '',
 })
 const txMemberSearch = ref('')
+const txMemberSearchInput = ref<HTMLInputElement | null>(null)
 const txMembers = ref<PassResult[]>([])
 const txSubmitting = ref(false)
 const txError = ref('')
@@ -1076,6 +1134,16 @@ function clearTxMember() {
   txForm.memberPhone = ''
   txForm.memberEmail = ''
   syncTxPaid()
+}
+
+function changeTxMember() {
+  clearTxMember()
+  txMemberSearch.value = ''
+  nextTick(() => txMemberSearchInput.value?.focus())
+}
+
+function onTxMemberSearchInput() {
+  if (txForm.memberName) clearTxMember()
 }
 
 async function loadTxMembers() {
@@ -1604,7 +1672,7 @@ function formatPdfDateTime(value: string): string {
   }).format(new Date(value))
 }
 
-async function downloadReportPdf(data: { visits: ReportVisit[]; summary: ReportSummary; planSessions?: PlanSession[]; sessionAlerts?: SessionAlert[] }) {
+async function buildReportPdf(data: { visits: ReportVisit[]; summary: ReportSummary; planSessions?: PlanSession[]; sessionAlerts?: SessionAlert[] }): Promise<{ blob: Blob; fileName: string }> {
   const { jsPDF } = await import('jspdf')
   const { autoTable } = await import('jspdf-autotable')
 
@@ -1885,7 +1953,56 @@ async function downloadReportPdf(data: { visits: ReportVisit[]; summary: ReportS
   const fileLabel = data.summary.dateFrom === data.summary.dateTo
     ? data.summary.dateFrom
     : `${data.summary.dateFrom}-to-${data.summary.dateTo}`
-  doc.save(`oasis-report-${fileLabel}.pdf`)
+
+  return {
+    blob: doc.output('blob'),
+    fileName: `oasis-report-${fileLabel}.pdf`,
+  }
+}
+
+function openPdfPreview(url: string, fileName: string) {
+  if (pdfPreviewUrl.value) URL.revokeObjectURL(pdfPreviewUrl.value)
+  pdfPreviewUrl.value = url
+  pdfPreviewFileName.value = fileName
+  showPdfPreview.value = true
+  nextTick(() => pdfPreviewCloseBtn.value?.focus())
+}
+
+function closePdfPreview() {
+  const wasOpen = showPdfPreview.value
+  if (pdfPreviewUrl.value) {
+    URL.revokeObjectURL(pdfPreviewUrl.value)
+    pdfPreviewUrl.value = ''
+  }
+  pdfPreviewFileName.value = ''
+  showPdfPreview.value = false
+  if (wasOpen) nextTick(() => exportPdfButton.value?.focus())
+}
+
+function downloadPreviewPdf() {
+  if (!import.meta.client || !pdfPreviewUrl.value) return
+  const link = document.createElement('a')
+  link.href = pdfPreviewUrl.value
+  link.download = pdfPreviewFileName.value || 'oasis-report.pdf'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
+function printPreviewPdf() {
+  if (!import.meta.client || !pdfPreviewUrl.value) return
+  const frame = pdfPreviewIframe.value
+  try {
+    if (frame?.contentWindow) {
+      frame.contentWindow.focus()
+      frame.contentWindow.print()
+      return
+    }
+  } catch {
+    // Fall through to a downloadable copy.
+  }
+  downloadPreviewPdf()
+  toast.error('Printing is not available in this browser. The PDF was downloaded instead.')
 }
 
 async function exportRange() {
@@ -1905,10 +2022,15 @@ async function exportRange() {
       params: { from: exportFrom.value, to: exportTo.value },
       cache: { store: 'reports', label: 'Export report' },
     })
-    await downloadReportPdf(data)
+    if (!moduleOpen.value || activeTab.value !== 'reports') return
+    const { blob, fileName } = await buildReportPdf(data)
+    if (!moduleOpen.value || activeTab.value !== 'reports') return
+    const previewUrl = URL.createObjectURL(blob)
     showExportModal.value = false
+    openPdfPreview(previewUrl, fileName)
   } catch {
-    if (isOnline.value) toast.error('Failed to export report.')
+    exportError.value = 'Failed to generate the PDF preview. Please try again.'
+    if (isOnline.value) toast.error('Failed to generate report preview.')
   } finally {
     exportLoading.value = false
   }
@@ -1920,7 +2042,7 @@ let commitRefreshTimer: ReturnType<typeof setTimeout> | null = null
 let refreshingData = false
 
 async function refreshActiveTab(silent = true) {
-  if (!authenticated.value || !isOnline.value || refreshingData) return
+  if (!authenticated.value || !moduleOpen.value || !isOnline.value || refreshingData) return
   if (import.meta.client && document.hidden) return
 
   refreshingData = true
@@ -1950,6 +2072,7 @@ watch(dataVersion, () => {
 })
 
 onMounted(async () => {
+  window.addEventListener('keydown', handleModuleKeydown)
   await checkSession()
   if (authenticated.value) {
     loadReports()
@@ -1961,10 +2084,13 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  closePdfPreview()
   if (autoRefreshTimer) clearInterval(autoRefreshTimer)
   if (commitRefreshTimer) clearTimeout(commitRefreshTimer)
   window.removeEventListener('focus', refreshOnVisible)
+  window.removeEventListener('keydown', handleModuleKeydown)
   document.removeEventListener('visibilitychange', refreshOnVisible)
+  if (import.meta.client) document.body.style.overflow = ''
 })
 
 </script>
@@ -1977,14 +2103,17 @@ onUnmounted(() => {
           <p class="font-display text-xl sm:text-2xl text-gold tracking-widest">OASIS<span class="text-cream">FIT</span></p>
           <p class="text-mist text-[10px] sm:text-xs uppercase tracking-wider">Staff Dashboard</p>
         </div>
-        <button
-          v-if="authenticated"
-          type="button"
-          class="text-xs sm:text-sm text-mist hover:text-gold transition-colors"
-          @click="logout"
-        >
-          Log out
-        </button>
+        <div class="flex items-center gap-3 sm:gap-4">
+          <ThemeToggle />
+          <button
+            v-if="authenticated"
+            type="button"
+            class="text-xs sm:text-sm text-mist hover:text-gold transition-colors"
+            @click="logout"
+          >
+            Log out
+          </button>
+        </div>
       </div>
     </header>
 
@@ -2018,50 +2147,69 @@ onUnmounted(() => {
 
       <!-- Dashboard -->
       <div v-else class="space-y-6 sm:space-y-8">
-        <!-- Tab Navigation -->
-        <div class="flex gap-1.5 sm:gap-2 border-b border-iron overflow-x-auto">
-          <button
-            type="button"
-            class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
-            :class="activeTab === 'reports' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
-            @click="activeTab = 'reports'"
-          >
-            Reports
-          </button>
-          <button
-            type="button"
-            class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
-            :class="activeTab === 'checkout' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
-            @click="activeTab = 'checkout'"
-          >
-            Check-out
-          </button>
-          <button
-            type="button"
-            class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
-            :class="activeTab === 'walkin' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
-            @click="activeTab = 'walkin'"
-          >
-            Register
-          </button>
-          <button
-            type="button"
-            class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
-            :class="activeTab === 'payment' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
-            @click="activeTab = 'payment'"
-          >
-            Payment
-          </button>
-          <button
-            type="button"
-            class="px-3 sm:px-4 py-2 text-[10px] sm:text-xs uppercase tracking-wider border-b-2 transition-colors shrink-0"
-            :class="activeTab === 'coaches' ? 'border-gold text-gold' : 'border-transparent text-mist hover:text-cream'"
-            @click="activeTab = 'coaches'"
-          >
-            Coaches
-          </button>
-        </div>
+        <!-- Main Menu -->
+        <section class="card p-4 sm:p-6">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 sm:mb-5">
+            <div>
+              <h1 class="font-display text-xl sm:text-2xl text-cream tracking-wide">Main Menu</h1>
+              <p class="text-mist text-[10px] sm:text-xs mt-0.5">Select a module to get started.</p>
+            </div>
+            <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-[0.2em]">Staff Dashboard</p>
+          </div>
 
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-3">
+            <button
+              v-for="module in MODULES"
+              :key="module.id"
+              type="button"
+              class="group card p-4 text-left hover:border-gold/50 transition-colors"
+              @click="openModule(module.id)"
+            >
+              <div class="flex items-start gap-3">
+                <div class="w-9 h-9 sm:w-10 sm:h-10 border border-gold/30 text-gold flex items-center justify-center shrink-0 group-hover:border-gold/60 transition-colors">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" :d="module.icon" />
+                  </svg>
+                </div>
+                <div class="min-w-0">
+                  <h2 class="font-display text-base sm:text-lg text-cream tracking-wide">{{ module.label }}</h2>
+                  <p class="text-mist text-[10px] sm:text-xs leading-relaxed mt-0.5">{{ module.description }}</p>
+                </div>
+              </div>
+              <span class="mt-3 inline-flex items-center gap-1 text-[9px] sm:text-[10px] uppercase tracking-wider text-gold">
+                Open <span aria-hidden="true">&rarr;</span>
+              </span>
+            </button>
+          </div>
+        </section>
+
+        <!-- Module Modal -->
+        <Teleport to="body">
+          <div
+            v-if="moduleOpen"
+            class="fixed inset-0 z-40 flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-scrim/85 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            :aria-label="activeModule.label"
+            @click.self="closeModule"
+          >
+            <div class="bg-onyx border border-iron sm:rounded-sm w-full sm:max-w-5xl h-full sm:h-auto sm:max-h-[92vh] flex flex-col overflow-hidden">
+              <div class="flex items-start justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-iron bg-obsidian/80 shrink-0">
+                <div>
+                  <h2 class="font-display text-lg sm:text-2xl text-cream tracking-wide">{{ activeModule.label }}</h2>
+                  <p class="text-mist text-[10px] sm:text-xs mt-0.5">{{ activeModule.description }}</p>
+                </div>
+                <button
+                  type="button"
+                  class="text-mist hover:text-cream transition-colors text-xl leading-none shrink-0"
+                  aria-label="Close module"
+                  @click="closeModule"
+                >
+                  &#x2715;
+                </button>
+              </div>
+
+              <div class="p-3 sm:p-5 overflow-y-auto flex-1 space-y-6 sm:space-y-8">
         <!-- REPORTS TAB -->
         <template v-if="activeTab === 'reports'">
           <!-- Renewal Reminders -->
@@ -2118,7 +2266,7 @@ onUnmounted(() => {
               >
                 This Year
               </button>
-              <button v-if="reportData" type="button" class="btn-outline px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs ml-auto" @click="openExportModal">
+              <button v-if="reportData" ref="exportPdfButton" type="button" class="btn-outline px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs ml-auto" @click="openExportModal">
                 Export PDF
               </button>
             </div>
@@ -2126,7 +2274,7 @@ onUnmounted(() => {
             <Teleport to="body">
               <div
                 v-if="showExportModal"
-                class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-onyx/90 backdrop-blur-sm"
+                class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/85 backdrop-blur-sm"
                 role="dialog"
                 aria-modal="true"
                 aria-label="Export report"
@@ -2134,7 +2282,7 @@ onUnmounted(() => {
               >
                 <div class="bg-graphite border border-iron rounded-sm max-w-sm w-full p-5 sm:p-6">
                   <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide mb-1">Export PDF Report</h2>
-                  <p class="text-mist text-[10px] sm:text-xs mb-4">Select the date range to include in the printable report.</p>
+                  <p class="text-mist text-[10px] sm:text-xs mb-4">Select the date range to preview the printable report.</p>
 
                   <div class="space-y-3">
                     <div>
@@ -2164,7 +2312,52 @@ onUnmounted(() => {
                       Cancel
                     </button>
                     <button type="button" class="btn-primary flex-1 text-[10px] sm:text-xs" :disabled="exportLoading" @click="exportRange">
-                      {{ exportLoading ? 'Generating…' : 'Export PDF' }}
+                      {{ exportLoading ? 'Generating…' : 'Preview PDF' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </Teleport>
+
+            <Teleport to="body">
+              <div
+                v-if="showPdfPreview"
+                class="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-scrim/85 backdrop-blur-sm"
+                role="dialog"
+                aria-modal="true"
+                aria-label="PDF report preview"
+                @click.self="closePdfPreview"
+              >
+                <div class="bg-obsidian border border-iron rounded-sm w-full sm:max-w-4xl h-[92vh] sm:h-[90vh] flex flex-col overflow-hidden">
+                  <div class="flex items-start justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-iron shrink-0">
+                    <div class="min-w-0">
+                      <h2 class="font-display text-lg sm:text-xl text-cream tracking-wide">PDF Preview</h2>
+                      <p class="text-mist text-[10px] sm:text-xs mt-0.5 truncate">{{ pdfPreviewFileName }}</p>
+                    </div>
+                    <button
+                      ref="pdfPreviewCloseBtn"
+                      type="button"
+                      class="text-mist hover:text-cream transition-colors text-xl leading-none shrink-0"
+                      aria-label="Close PDF preview"
+                      @click="closePdfPreview"
+                    >
+                      &#x2715;
+                    </button>
+                  </div>
+                  <div class="flex-1 min-h-0 bg-graphite p-2 sm:p-3">
+                    <iframe
+                      ref="pdfPreviewIframe"
+                      :src="pdfPreviewUrl"
+                      class="w-full h-full bg-white border-0"
+                      title="PDF report preview"
+                    />
+                  </div>
+                  <div class="flex flex-col sm:flex-row gap-2 p-3 sm:p-4 border-t border-iron bg-obsidian/80 shrink-0">
+                    <button type="button" class="btn-primary flex-1 text-[10px] sm:text-xs py-2 sm:py-2.5" @click="printPreviewPdf">
+                      Print
+                    </button>
+                    <button type="button" class="btn-outline flex-1 text-[10px] sm:text-xs py-2 sm:py-2.5" @click="downloadPreviewPdf">
+                      Download PDF
                     </button>
                   </div>
                 </div>
@@ -2215,7 +2408,7 @@ onUnmounted(() => {
               </div>
 
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
-                <div class="border border-iron bg-graphite/40 p-4">
+                <div class="border border-iron bg-graphite p-4">
                   <div class="flex items-start justify-between gap-2">
                     <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Walk-in Revenue</p>
                     <span class="text-gold text-[10px] sm:text-xs font-semibold tabular-nums">{{ revenueShare(reportData.summary.walkinRevenue, reportData.summary.totalRevenue) }}%</span>
@@ -2225,7 +2418,7 @@ onUnmounted(() => {
                     <div class="h-full bg-gold" :style="{ width: `${revenueShare(reportData.summary.walkinRevenue, reportData.summary.totalRevenue)}%` }" />
                   </div>
                 </div>
-                <div class="border border-iron bg-graphite/40 p-4">
+                <div class="border border-iron bg-graphite p-4">
                   <div class="flex items-start justify-between gap-2">
                     <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Membership Revenue</p>
                     <span class="text-blue-400 text-[10px] sm:text-xs font-semibold tabular-nums">{{ revenueShare(reportData.summary.membershipRevenue, reportData.summary.totalRevenue) }}%</span>
@@ -2235,7 +2428,7 @@ onUnmounted(() => {
                     <div class="h-full bg-blue-400" :style="{ width: `${revenueShare(reportData.summary.membershipRevenue, reportData.summary.totalRevenue)}%` }" />
                   </div>
                 </div>
-                <div class="border border-iron bg-graphite/40 p-4">
+                <div class="border border-iron bg-graphite p-4">
                   <div class="flex items-start justify-between gap-2">
                     <p class="text-mist text-[9px] sm:text-[10px] uppercase tracking-wider">Combined Revenue</p>
                     <span class="text-cream text-[10px] sm:text-xs font-semibold tabular-nums">100%</span>
@@ -2248,7 +2441,7 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <div class="border border-iron bg-graphite/30 mb-4 sm:mb-6">
+              <div class="border border-iron bg-graphite mb-4 sm:mb-6">
                 <div class="flex items-center justify-between gap-2 px-4 py-3 border-b border-iron">
                   <div>
                     <h3 class="font-display text-base sm:text-lg text-cream tracking-wide">Session Usage</h3>
@@ -2290,7 +2483,7 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <div v-if="reportData.sessionAlerts?.length" class="border border-iron bg-graphite/30 mb-4 sm:mb-6">
+              <div v-if="reportData.sessionAlerts?.length" class="border border-iron bg-graphite mb-4 sm:mb-6">
                 <div class="flex items-center justify-between gap-2 px-4 py-3 border-b border-iron">
                   <div>
                     <h3 class="font-display text-base sm:text-lg text-cream tracking-wide">Session Alerts</h3>
@@ -2301,7 +2494,7 @@ onUnmounted(() => {
                 <div class="overflow-x-auto">
                   <table class="w-full text-[10px] sm:text-xs min-w-[520px]">
                     <thead>
-                      <tr class="bg-obsidian/60 border-b border-iron">
+                      <tr class="bg-obsidian border-b border-iron">
                         <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Client</th>
                         <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Contact</th>
                         <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Plan</th>
@@ -2310,7 +2503,7 @@ onUnmounted(() => {
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="alert in reportData.sessionAlerts" :key="alert.id" class="border-b border-iron/40 last:border-0">
+                      <tr v-for="alert in reportData.sessionAlerts" :key="alert.id" class="border-b border-iron last:border-0">
                         <td class="p-2.5 sm:p-3 text-cream">{{ alert.fullName }}</td>
                         <td class="p-2.5 sm:p-3 text-mist">{{ alert.phone }}</td>
                         <td class="p-2.5 sm:p-3 text-cream uppercase">{{ alert.plan }}</td>
@@ -2328,7 +2521,7 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <div v-if="reportData?.chartData?.length > 0 && reportData.chartData.some(p => p.revenue > 0)" class="border border-iron bg-graphite/30 mb-4 sm:mb-6">
+              <div v-if="reportData?.chartData?.length > 0 && reportData.chartData.some(p => p.revenue > 0)" class="border border-iron bg-graphite mb-4 sm:mb-6">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 border-b border-iron">
                   <div>
                     <h3 class="font-display text-base sm:text-lg text-cream tracking-wide">Revenue Trend</h3>
@@ -2346,7 +2539,7 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <div class="overflow-x-auto p-4">
-                  <div class="flex items-end gap-1 sm:gap-1.5 min-h-[160px] sm:min-h-[200px] px-2 pb-8 border-b border-iron/60">
+                  <div class="flex items-end gap-1 sm:gap-1.5 min-h-[160px] sm:min-h-[200px] px-2 pb-8 border-b border-iron">
                     <div
                       v-for="point in reportData.chartData"
                       :key="point.date"
@@ -2371,62 +2564,122 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <div class="border border-iron bg-graphite/30">
+              <!-- Visit Log -->
+              <div class="border border-iron bg-graphite mb-4 sm:mb-6">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 border-b border-iron">
                   <div>
-                    <h3 class="font-display text-base sm:text-lg text-cream tracking-wide">Activity Log</h3>
-                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">{{ activities.length }} recent activities</p>
+                    <h3 class="font-display text-base sm:text-lg text-cream tracking-wide">Visit Log</h3>
+                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">{{ reportPeriodLabel }} · checked-out clients (all account types)</p>
                   </div>
-                  <button
-                    type="button"
-                    class="btn-outline text-[10px] sm:text-xs px-3 py-1.5 shrink-0"
-                    @click="openActivityModal"
-                  >
-                    View Activity
-                  </button>
+                  <span class="text-gold text-[9px] sm:text-[10px] uppercase tracking-wider">{{ checkoutVisits.length }} total</span>
                 </div>
 
-                <p v-if="activitiesError" class="text-red-400 text-xs sm:text-sm px-4 py-3">{{ activitiesError }}</p>
-                <div v-if="activitiesLoading && !activities.length" class="text-mist text-xs sm:text-sm text-center py-8">
-                  Loading activity…
+                <div v-if="!checkoutVisits.length" class="text-center py-10">
+                  <p class="text-mist text-xs sm:text-sm">No clients checked out yet{{ reportPeriod === 'day' ? ' today' : ' for this period' }}.</p>
                 </div>
-                <div v-else-if="!activities.length" class="text-center py-10">
-                  <p class="text-mist text-xs sm:text-sm">No activity recorded yet.</p>
+                <div v-else class="overflow-x-auto overflow-y-auto max-h-96">
+                  <table class="w-full text-[10px] sm:text-xs min-w-[560px]">
+                    <thead class="sticky top-0 z-10">
+                      <tr class="bg-obsidian border-b border-iron">
+                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Client</th>
+                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Contact</th>
+                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Pass Code</th>
+                        <th class="text-left p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Checked Out</th>
+                        <th class="text-right p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Amount</th>
+                        <th class="text-right p-2.5 sm:p-3 text-gold font-display tracking-wide text-[9px] sm:text-[10px] uppercase">Sessions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="visit in checkoutVisits" :key="visit.id" class="border-b border-iron last:border-0">
+                        <td class="p-2.5 sm:p-3 text-cream">{{ visit.fullName }}</td>
+                        <td class="p-2.5 sm:p-3 text-mist">
+                          <p>{{ visit.phone }}</p>
+                          <p v-if="visit.email" class="text-[9px] sm:text-[10px] text-mist">{{ visit.email }}</p>
+                        </td>
+                        <td class="p-2.5 sm:p-3 text-cream uppercase">{{ visit.passCode }}</td>
+                        <td class="p-2.5 sm:p-3 text-mist whitespace-nowrap">{{ visit.checkedInAt ? activityDateTime(visit.checkedInAt) : '—' }}</td>
+                        <td class="p-2.5 sm:p-3 text-right text-gold tabular-nums">{{ visit.paymentAmount != null ? `₱${visit.paymentAmount.toLocaleString()}` : '—' }}</td>
+                        <td class="p-2.5 sm:p-3 text-right tabular-nums" :class="visit.session && visit.session.sessionsRemaining > 0 ? 'text-green-400' : 'text-mist'">
+                          {{ visit.session ? `${visit.session.sessionsRemaining} left` : '—' }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
-                <ul v-else class="divide-y divide-iron/40 max-h-80 overflow-y-auto">
-                  <li
-                    v-for="activity in activities"
-                    :key="activity.id"
-                    class="flex items-start justify-between gap-3 px-4 py-3"
-                  >
-                    <div class="min-w-0">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <span
-                          class="inline-flex items-center px-2 py-0.5 text-[8px] sm:text-[9px] uppercase tracking-wider border"
-                          :class="activityCategoryClass(activity.category)"
-                        >
-                          {{ activityCategoryLabel(activity.category) }}
-                        </span>
-                        <p class="text-cream text-xs sm:text-sm font-medium">{{ activity.title }}</p>
+              </div>
+
+              <!-- Activity Log (minimized) -->
+              <div class="border border-iron bg-graphite">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3">
+                  <div>
+                    <h3 class="font-display text-base sm:text-lg text-cream tracking-wide">Activity Log</h3>
+                    <p class="text-mist text-[9px] sm:text-[10px] mt-0.5">
+                      {{ activities.length }} recent activities<span v-if="!showActivityLog"> · minimized</span>
+                    </p>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      class="btn-outline text-[10px] sm:text-xs px-3 py-1.5"
+                      @click="openActivityModal"
+                    >
+                      View Activity
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-outline text-[10px] sm:text-xs px-3 py-1.5"
+                      :aria-expanded="showActivityLog"
+                      aria-controls="reports-activity-list"
+                      @click="showActivityLog = !showActivityLog"
+                    >
+                      {{ showActivityLog ? 'Hide' : 'Show' }}
+                    </button>
+                  </div>
+                </div>
+
+                <div v-if="showActivityLog" id="reports-activity-list" class="border-t border-iron">
+                  <p v-if="activitiesError" class="text-red-400 text-xs sm:text-sm px-4 py-3">{{ activitiesError }}</p>
+                  <div v-if="activitiesLoading && !activities.length" class="text-mist text-xs sm:text-sm text-center py-8">
+                    Loading activity…
+                  </div>
+                  <div v-else-if="!activities.length" class="text-center py-10">
+                    <p class="text-mist text-xs sm:text-sm">No activity recorded yet.</p>
+                  </div>
+                  <ul v-else class="divide-y divide-iron max-h-80 overflow-y-auto">
+                    <li
+                      v-for="activity in activities"
+                      :key="activity.id"
+                      class="flex items-start justify-between gap-3 px-4 py-3"
+                    >
+                      <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span
+                            class="inline-flex items-center px-2 py-0.5 text-[8px] sm:text-[9px] uppercase tracking-wider border"
+                            :class="activityCategoryClass(activity.category)"
+                          >
+                            {{ activityCategoryLabel(activity.category) }}
+                          </span>
+                          <p class="text-cream text-xs sm:text-sm font-medium">{{ activity.title }}</p>
+                        </div>
+                        <p v-if="activity.description" class="text-mist text-[10px] sm:text-xs mt-0.5 break-words">{{ activity.description }}</p>
+                        <p v-if="activity.staff" class="text-mist text-[9px] sm:text-[10px] mt-0.5">by {{ activity.staff }}</p>
                       </div>
-                      <p v-if="activity.description" class="text-mist text-[10px] sm:text-xs mt-0.5 break-words">{{ activity.description }}</p>
-                      <p v-if="activity.staff" class="text-mist/60 text-[9px] sm:text-[10px] mt-0.5">by {{ activity.staff }}</p>
-                    </div>
-                    <div class="shrink-0 text-right">
-                      <p class="text-mist text-[9px] sm:text-[10px] whitespace-nowrap">{{ activityDateTime(activity.createdAt) }}</p>
-                      <p v-if="activity.amount != null && activity.amount > 0" class="text-gold text-[10px] sm:text-xs tabular-nums mt-0.5">
-                        ₱{{ activity.amount.toLocaleString() }}
-                      </p>
-                    </div>
-                  </li>
-                </ul>
+                      <div class="shrink-0 text-right">
+                        <p class="text-mist text-[9px] sm:text-[10px] whitespace-nowrap">{{ activityDateTime(activity.createdAt) }}</p>
+                        <p v-if="activity.amount != null && activity.amount > 0" class="text-gold text-[10px] sm:text-xs tabular-nums mt-0.5">
+                          ₱{{ activity.amount.toLocaleString() }}
+                        </p>
+                      </div>
+                    </li>
+                  </ul>
+                </div>
               </div>
 
               <!-- Activity Log Modal -->
               <Teleport to="body">
                 <div
                   v-if="showActivityModal"
-                  class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-onyx/90 backdrop-blur-sm"
+                  class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-scrim/85 backdrop-blur-sm"
                   role="dialog"
                   aria-modal="true"
                   aria-label="Activity log"
@@ -2471,7 +2724,7 @@ onUnmounted(() => {
                       <p v-else-if="!filteredActivities.length" class="text-mist text-sm text-center py-8">
                         No activities match your filter.
                       </p>
-                      <ul v-else class="divide-y divide-iron/40">
+                      <ul v-else class="divide-y divide-iron">
                         <li
                           v-for="activity in filteredActivities"
                           :key="activity.id"
@@ -2488,11 +2741,11 @@ onUnmounted(() => {
                               <p class="text-cream text-xs sm:text-sm font-medium">{{ activity.title }}</p>
                             </div>
                             <p v-if="activity.description" class="text-mist text-[10px] sm:text-xs mt-0.5 break-words">{{ activity.description }}</p>
-                            <p v-if="activity.clientName || activity.reference" class="text-mist/60 text-[9px] sm:text-[10px] mt-0.5 break-words">
+                            <p v-if="activity.clientName || activity.reference" class="text-mist text-[9px] sm:text-[10px] mt-0.5 break-words">
                               <span v-if="activity.clientName">{{ activity.clientName }}</span>
                               <span v-if="activity.reference"> · {{ activity.reference }}</span>
                             </p>
-                            <p v-if="activity.staff" class="text-mist/60 text-[9px] sm:text-[10px] mt-0.5">by {{ activity.staff }}</p>
+                            <p v-if="activity.staff" class="text-mist text-[9px] sm:text-[10px] mt-0.5">by {{ activity.staff }}</p>
                           </div>
                           <div class="shrink-0 text-right">
                             <p class="text-mist text-[9px] sm:text-[10px] whitespace-nowrap">{{ activityDateTime(activity.createdAt) }}</p>
@@ -2668,25 +2921,47 @@ onUnmounted(() => {
                     <div class="min-w-0">
                       <p class="text-cream font-medium text-sm sm:text-base truncate">{{ member.fullName }}</p>
                       <p class="text-mist text-xs sm:text-sm truncate">{{ member.phone || 'No phone' }}</p>
-                      <p class="text-[10px] sm:text-xs uppercase tracking-wider mt-0.5" :class="clientTypeClass(member)">
-                        {{ clientTypeLabelFor(member) }}
-                      </p>
                       <p class="text-mist text-[10px] sm:text-xs mt-0.5">
                         Default: ₱{{ clientDefaultRateFor(member).toLocaleString() }}
                       </p>
                       <p v-if="member.memberStatus === 'weekly' || member.memberStatus === 'monthly'" class="text-[10px] sm:text-xs mt-0.5" :class="sessionClass(member)">
                         {{ sessionLabel(member) }}
                       </p>
-                      <label class="inline-flex items-center gap-1.5 mt-1 text-[10px] sm:text-xs text-mist cursor-pointer" @click.stop>
-                        <input
-                          type="checkbox"
-                          class="accent-gold"
-                          :checked="member.customerType === 'member'"
-                          :disabled="memberStatusUpdating === member.id"
-                          @change="onMemberToggle(member, $event)"
-                        />
-                        Member
-                      </label>
+                      <div class="grid grid-cols-2 gap-2 sm:gap-3 mt-2" @click.stop>
+                        <div>
+                          <p class="text-[9px] sm:text-[10px] uppercase tracking-wider text-mist mb-1">Membership Status</p>
+                          <div class="space-y-1">
+                            <label
+                              v-for="option in memberStatusOptions"
+                              :key="option.id"
+                              class="flex items-center gap-1.5 text-[10px] sm:text-xs cursor-pointer"
+                              :class="(member.memberStatus ?? 'walkin') === option.id ? 'text-gold' : 'text-mist'"
+                            >
+                              <input
+                                type="checkbox"
+                                class="accent-gold"
+                                :checked="(member.memberStatus ?? 'walkin') === option.id"
+                                :disabled="memberStatusUpdating === member.id"
+                                @click.prevent="updateMemberStatus(member, option.id)"
+                              />
+                              {{ option.short }}
+                            </label>
+                          </div>
+                        </div>
+                        <div>
+                          <p class="text-[9px] sm:text-[10px] uppercase tracking-wider text-mist mb-1">Customer Type</p>
+                          <label class="flex items-center gap-1.5 text-[10px] sm:text-xs text-mist cursor-pointer">
+                            <input
+                              type="checkbox"
+                              class="accent-gold"
+                              :checked="member.customerType === 'member'"
+                              :disabled="memberStatusUpdating === member.id"
+                              @change="onMemberToggle(member, $event)"
+                            />
+                            Member
+                          </label>
+                        </div>
+                      </div>
                     </div>
                     <div class="shrink-0 text-right">
                       <span class="block text-[10px] sm:text-xs uppercase tracking-wider" :class="statusClass(member.status)">
@@ -2730,7 +3005,7 @@ onUnmounted(() => {
           <Teleport to="body">
             <div
               v-if="selectedPass"
-              class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-onyx/90 backdrop-blur-sm"
+              class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/85 backdrop-blur-sm"
               role="dialog"
               aria-modal="true"
               aria-label="Pass details"
@@ -2805,47 +3080,6 @@ onUnmounted(() => {
                     <dd class="text-orange-400 text-right">Not started yet</dd>
                   </div>
                 </dl>
-
-                <div class="mb-4 sm:mb-6">
-                  <p class="block text-[11px] sm:text-sm text-mist mb-1 sm:mb-2">Change Membership Status</p>
-                  <div class="grid grid-cols-2 gap-1.5 sm:gap-2">
-                    <button
-                      v-for="option in memberStatusOptions"
-                      :key="option.id"
-                      type="button"
-                      class="border px-2 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider transition-colors"
-                      :class="(selectedPass.memberStatus ?? 'walkin') === option.id ? 'border-gold text-gold' : 'border-iron text-mist hover:text-cream'"
-                      :disabled="memberStatusUpdating === selectedPass.id"
-                      @click="updateMemberStatus(selectedPass, option.id)"
-                    >
-                      {{ option.short }}
-                    </button>
-                  </div>
-                </div>
-
-                <div class="mb-4 sm:mb-6">
-                  <p class="block text-[11px] sm:text-sm text-mist mb-1 sm:mb-2">Change Customer Type</p>
-                  <div class="grid grid-cols-2 gap-1.5 sm:gap-2">
-                    <button
-                      type="button"
-                      class="border px-2 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider transition-colors"
-                      :class="selectedPass.customerType === 'member' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:text-cream'"
-                      :disabled="memberStatusUpdating === selectedPass.id"
-                      @click="updateCustomerType(selectedPass, 'member')"
-                    >
-                      Member
-                    </button>
-                    <button
-                      type="button"
-                      class="border px-2 py-1.5 text-[10px] sm:text-xs uppercase tracking-wider transition-colors"
-                      :class="selectedPass.customerType !== 'member' ? 'border-gold text-gold bg-gold/5' : 'border-iron text-mist hover:text-cream'"
-                      :disabled="memberStatusUpdating === selectedPass.id"
-                      @click="updateCustomerType(selectedPass, 'non_member')"
-                    >
-                      Non-member
-                    </button>
-                  </div>
-                </div>
 
                 <div v-if="selectedPass.status === 'registered'" class="mb-4 sm:mb-6">
                   <label for="co-pay-amount" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">Payment Amount (₱)</label>
@@ -2976,9 +3210,9 @@ onUnmounted(() => {
                   </div>
                   <div>
                     <label for="wi-phone" class="block text-[11px] sm:text-sm text-mist mb-0.5 sm:mb-1">
-                    Phone <span class="text-mist/60">(optional)</span>
+                    Phone <span class="text-mist">(optional)</span>
                   </label>
-                    <div class="flex items-stretch w-full bg-graphite border border-iron rounded-sm focus-within:border-gold transition-colors">
+                    <div class="flex items-stretch w-full bg-input border border-iron rounded-sm focus-within:border-gold transition-colors">
                       <span class="flex items-center px-3 sm:px-4 text-sm sm:text-base text-mist border-r border-iron select-none" aria-hidden="true">+63</span>
                       <input
                         id="wi-phone"
@@ -2987,7 +3221,7 @@ onUnmounted(() => {
                         inputmode="numeric"
                         autocomplete="off"
                         maxlength="10"
-                        class="flex-1 min-w-0 bg-transparent px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-cream placeholder:text-mist/60 focus:outline-none"
+                        class="flex-1 min-w-0 bg-transparent px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-cream placeholder:text-mist/90 focus:outline-none"
                         placeholder="9171234567"
                         aria-label="Philippine mobile number without the +63 prefix"
                         @input="onPhoneInput"
@@ -3130,40 +3364,48 @@ onUnmounted(() => {
             <!-- Member picker -->
             <div class="mb-4">
               <label class="block text-[11px] sm:text-sm text-mist mb-1 sm:mb-2">Member *</label>
-              <div v-if="txForm.memberName" class="flex items-center justify-between gap-3 border border-gold bg-gold/5 px-3 py-2.5">
+              <input
+                ref="txMemberSearchInput"
+                v-model="txMemberSearch"
+                type="search"
+                class="input-field"
+                placeholder="Search member by name or phone…"
+                @input="onTxMemberSearchInput"
+              />
+              <div v-if="txForm.memberName" class="mt-1.5 flex items-center justify-between gap-3 border border-gold bg-gold/5 px-3 py-2.5">
                 <div class="min-w-0">
                   <p class="text-cream text-xs sm:text-sm font-medium truncate">{{ txForm.memberName }}</p>
-                  <p class="text-mist text-[10px] sm:text-xs">{{ txForm.memberPhone }}</p>
+                  <p class="text-mist text-[10px] sm:text-xs">{{ txForm.memberPhone || 'No phone' }}</p>
                 </div>
-                <button type="button" class="text-mist hover:text-red-400 text-[10px] sm:text-xs uppercase tracking-wider shrink-0" @click="clearTxMember">
-                  Change
+                <button
+                  type="button"
+                  class="border border-gold text-gold hover:bg-gold/10 px-2.5 py-1 text-[10px] sm:text-xs uppercase tracking-wider shrink-0 transition-colors"
+                  @click="changeTxMember"
+                >
+                  Change member
                 </button>
               </div>
-              <template v-else>
-                <input
-                  v-model="txMemberSearch"
-                  type="search"
-                  class="input-field"
-                  placeholder="Search member by name or phone…"
-                />
-                <ul v-if="txMemberMatches.length" class="mt-1.5 border border-iron divide-y divide-iron max-h-56 overflow-y-auto">
-                  <li v-for="member in txMemberMatches" :key="member.id">
-                    <button
-                      type="button"
-                      class="w-full text-left px-3 py-2 hover:bg-graphite transition-colors"
-                      @click="selectTxMember(member)"
-                    >
-                      <p class="text-cream text-xs sm:text-sm truncate">{{ member.fullName }}</p>
-                      <p class="text-mist text-[10px] sm:text-xs">
-                        {{ member.phone }} · <span :class="clientTypeClass(member)">{{ clientTypeLabelFor(member) }}</span> · ₱{{ clientDefaultRateFor(member).toLocaleString() }}
-                      </p>
-                    </button>
-                  </li>
-                </ul>
-                <p v-else class="text-mist text-[10px] sm:text-xs mt-1.5">
-                  {{ txMemberSearch ? 'No members match.' : 'Loading members…' }}
-                </p>
-              </template>
+              <ul v-if="txMemberMatches.length" class="mt-1.5 border border-iron divide-y divide-iron max-h-56 overflow-y-auto">
+                <li v-for="member in txMemberMatches" :key="member.id">
+                  <button
+                    type="button"
+                    class="w-full text-left px-3 py-2 transition-colors"
+                    :class="member.id === txForm.memberId ? 'bg-gold/10' : 'hover:bg-graphite'"
+                    @click="selectTxMember(member)"
+                  >
+                    <p class="text-cream text-xs sm:text-sm truncate">
+                      {{ member.fullName }}
+                      <span v-if="member.id === txForm.memberId" class="text-gold text-[9px] uppercase tracking-wider">Selected</span>
+                    </p>
+                    <p class="text-mist text-[10px] sm:text-xs">
+                      {{ member.phone || 'No phone' }} · <span :class="clientTypeClass(member)">{{ clientTypeLabelFor(member) }}</span> · ₱{{ clientDefaultRateFor(member).toLocaleString() }}
+                    </p>
+                  </button>
+                </li>
+              </ul>
+              <p v-else class="text-mist text-[10px] sm:text-xs mt-1.5">
+                {{ txMemberSearch ? 'No members match.' : 'Loading members…' }}
+              </p>
             </div>
 
             <!-- Plan -->
@@ -3421,7 +3663,7 @@ onUnmounted(() => {
                 class="border border-iron rounded-sm overflow-hidden"
               >
                 <!-- Payment Header -->
-                <div class="flex items-center justify-between gap-3 p-3 sm:p-4 bg-graphite/50">
+                <div class="flex items-center justify-between gap-3 p-3 sm:p-4 bg-graphite">
                   <div class="min-w-0">
                     <p class="text-cream font-medium text-sm sm:text-base truncate">{{ payment.fullName }}</p>
                     <p class="text-mist text-[10px] sm:text-xs mt-0.5">{{ payment.phone }} · {{ payment.email }}</p>
@@ -3495,7 +3737,7 @@ onUnmounted(() => {
                     </div>
                   </div>
 
-                  <div class="text-[9px] sm:text-[10px] text-mist pt-1 border-t border-iron/50">
+                  <div class="text-[9px] sm:text-[10px] text-mist pt-1 border-t border-iron">
                     Submitted: {{ new Date(payment.createdAt).toLocaleString() }}
                   </div>
 
@@ -3633,7 +3875,7 @@ onUnmounted(() => {
           </section>
 
           <!-- Receipt Modal -->
-          <div v-if="receiptModalUrl || receiptModalLoading" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-onyx/90 backdrop-blur-sm" @click.self="receiptModalUrl = ''; receiptModalLoading = false">
+          <div v-if="receiptModalUrl || receiptModalLoading" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/85 backdrop-blur-sm" @click.self="receiptModalUrl = ''; receiptModalLoading = false">
             <div class="bg-graphite border border-iron rounded-sm max-w-lg w-full max-h-[90vh] overflow-hidden">
               <div class="flex items-center justify-between p-3 sm:p-4 border-b border-iron">
                 <div>
@@ -3712,7 +3954,7 @@ onUnmounted(() => {
                   </div>
                   <div class="text-[10px] sm:text-xs text-mist">
                     <p class="text-gold hover:underline">Tap to upload photo</p>
-                    <p class="text-mist/60">JPEG, PNG, or WebP — max 5MB</p>
+                    <p class="text-mist">JPEG, PNG, or WebP — max 5MB</p>
                   </div>
                 </label>
                 <input id="coach-photo" type="file" accept="image/jpeg,image/jpg,image/png,image/webp" class="sr-only" @change="handleCoachPhotoChange" />
@@ -3772,6 +4014,10 @@ onUnmounted(() => {
             </ul>
           </section>
         </template>
+              </div>
+            </div>
+          </div>
+        </Teleport>
       </div>
     </main>
   </div>

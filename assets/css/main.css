@@ -2,8 +2,85 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+
+  --onyx: 18 18 18;
+  --obsidian: 36 36 36;
+  --graphite: 30 30 30;
+  --iron: 56 56 56;
+  --cream: 255 255 255;
+  --mist: 189 189 189;
+  --input: 42 42 42;
+  --gold: 201 168 76;
+  --gold-light: 226 201 126;
+  --scrim: 0 0 0;
+  --shadow: 0 0 0;
+  --shadow-alpha: 0.55;
+
+  --red-300: 252 165 165;
+  --red-400: 248 113 113;
+  --red-500: 239 68 68;
+  --red-700: 185 28 28;
+  --red-900: 127 29 29;
+
+  --green-300: 134 239 172;
+  --green-400: 74 222 128;
+  --green-500: 34 197 94;
+  --green-700: 21 128 61;
+  --green-900: 20 83 45;
+
+  --orange-400: 251 146 60;
+  --yellow-400: 250 204 21;
+  --yellow-500: 234 179 8;
+  --purple-400: 192 132 252;
+  --blue-400: 96 165 250;
+  --blue-500: 59 130 246;
+  --sky-300: 125 211 252;
+  --sky-400: 56 189 248;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --onyx: 255 255 255;
+  --obsidian: 255 255 255;
+  --graphite: 245 247 250;
+  --iron: 229 231 235;
+  --cream: 26 26 26;
+  --mist: 85 85 85;
+  --input: 255 255 255;
+  --gold: 122 93 22;
+  --gold-light: 138 107 31;
+  --scrim: 0 0 0;
+  --shadow: 15 23 42;
+  --shadow-alpha: 0.12;
+
+  --red-300: 185 28 28;
+  --red-400: 185 28 28;
+  --red-500: 220 38 38;
+  --red-700: 252 165 165;
+  --red-900: 254 226 226;
+
+  --green-300: 22 101 52;
+  --green-400: 22 101 52;
+  --green-500: 21 128 61;
+  --green-700: 134 239 172;
+  --green-900: 220 252 231;
+
+  --orange-400: 154 52 18;
+  --yellow-400: 133 77 14;
+  --yellow-500: 161 98 7;
+  --purple-400: 126 34 206;
+  --blue-400: 29 78 216;
+  --blue-500: 37 99 235;
+  --sky-300: 3 105 161;
+  --sky-400: 2 132 199;
+}
+
 @layer base {
   html {
+    @apply bg-onyx;
     scroll-behavior: smooth;
   }
 
@@ -22,6 +99,48 @@
 
   body {
     @apply bg-onyx text-cream font-body antialiased;
+  }
+
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  select:-webkit-autofill {
+    -webkit-text-fill-color: rgb(var(--cream));
+    caret-color: rgb(var(--cream));
+    box-shadow: 0 0 0 1000px rgb(var(--input)) inset;
+    -webkit-box-shadow: 0 0 0 1000px rgb(var(--input)) inset;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--mist) / 0.35) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--mist) / 0.35);
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover,
+  ::-webkit-scrollbar-thumb:active {
+    background-color: rgb(var(--gold) / 0.6);
+  }
+
+  ::-webkit-scrollbar-button {
+    display: none;
   }
 
   ::selection {
@@ -55,12 +174,75 @@
   }
 
   .input-field {
-    @apply w-full bg-graphite border border-iron rounded-sm px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-cream placeholder:text-mist/60 focus:border-gold focus:outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply w-full bg-input border border-iron rounded-sm px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-cream placeholder:text-mist/90 focus:border-gold focus:outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .input-field option {
+    @apply bg-input text-cream;
+  }
+
+  .hero-glow {
+    opacity: 0.2;
+    background-image:
+      radial-gradient(circle at 20% 50%, rgb(var(--gold)) 0%, transparent 50%),
+      radial-gradient(circle at 80% 20%, rgb(var(--gold)) 0%, transparent 40%);
+  }
+
+  [data-theme='light'] .hero-glow {
+    opacity: 0.05;
   }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.theme-transitioning,
+.theme-transitioning *,
+.theme-transitioning *::before,
+.theme-transitioning *::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow, transform, opacity !important;
+  transition-duration: 300ms !important;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(root) {
+  z-index: 1;
+}
+
+::view-transition-old(root) {
+  z-index: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-transitioning,
+  .theme-transitioning *,
+  .theme-transitioning *::before,
+  .theme-transitioning *::after {
+    transition: none !important;
+  }
+
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
   }
 }

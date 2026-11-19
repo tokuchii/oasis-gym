@@ -286,7 +286,7 @@ export function validateMembershipPayload(fields: Record<string, string>) {
   const emailErr = validateEmail(emailRaw)
   if (emailErr) errors.push(emailErr)
 
-  const phoneErr = validatePhone(phoneRaw)
+  const phoneErr = phoneRaw.trim() ? validatePhone(phoneRaw) : null
   if (phoneErr) errors.push(phoneErr)
 
   if (!['daily', 'weekly', 'monthly'].includes(plan)) errors.push('Plan must be daily, weekly, or monthly.')
@@ -299,7 +299,7 @@ export function validateMembershipPayload(fields: Record<string, string>) {
     throw createError({ statusCode: 400, statusMessage: errors.join(' ') })
   }
 
-  return { fullName, email: emailRaw.trim().toLowerCase(), phone: normalizePhone(phoneRaw), plan, customerType, paymentMethod, referenceNo, amount }
+  return { fullName, email: emailRaw.trim().toLowerCase(), phone: phoneRaw.trim() ? normalizePhone(phoneRaw) : '', plan, customerType, paymentMethod, referenceNo, amount }
 }
 
 export function serializePass(pass: WalkinPass) {

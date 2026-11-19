@@ -49,8 +49,10 @@ export default defineEventHandler(async (event) => {
     const emailErr = validateEmail(emailRaw)
     if (emailErr) errors.push(emailErr)
   }
-  const phoneErr = validatePhone(phoneRaw)
-  if (phoneErr) errors.push(phoneErr)
+  if (phoneRaw) {
+    const phoneErr = validatePhone(phoneRaw)
+    if (phoneErr) errors.push(phoneErr)
+  }
   if (!PLAN_TERMS[plan]) errors.push('Plan must be daily, weekly, or monthly.')
   if (!['member', 'non_member'].includes(customerType)) errors.push('Customer type must be member or non-member.')
   if (!PAYMENT_METHODS.includes(paymentMethod)) errors.push('Payment method must be cash, GCash, or bank transfer.')
@@ -81,7 +83,7 @@ export default defineEventHandler(async (event) => {
   const balance = Math.max(0, amount - paidAmount)
   const change = Math.max(0, paidAmount - amount)
 
-  const phone = normalizePhone(phoneRaw)
+  const phone = phoneRaw ? normalizePhone(phoneRaw) : ''
   const startDate = getVisitDateManila()
   const expiryDate = addDays(startDate, getPlanDays(plan))
 

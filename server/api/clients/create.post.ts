@@ -1,6 +1,7 @@
 import { logActivity } from '~/server/utils/activity'
 import { requireStaff } from '~/server/utils/auth'
 import { useSupabaseAdmin } from '~/server/utils/supabase'
+import { normalizePhone, validatePhone } from '~/server/utils/walkin'
 import { getPlanDays, getPlanRate, getPlanSessions, type CustomerType, type MembershipPlanId } from '~/types/walkin'
 
 export default defineEventHandler(async (event) => {
@@ -23,8 +24,11 @@ export default defineEventHandler(async (event) => {
   if (!clientEmail) {
     throw createError({ statusCode: 400, statusMessage: 'Client email is required.' })
   }
-  if (!clientPhone) {
-    throw createError({ statusCode: 400, statusMessage: 'Client phone is required.' })
+  if (clientPhone) {
+    const phoneErr = validatePhone(clientPhone)
+    if (phoneErr) {
+      throw createError({ statusCode: 400, statusMessage: phoneErr })
+    }
   }
   if (!['daily', 'weekly', 'monthly'].includes(plan)) {
     throw createError({ statusCode: 400, statusMessage: 'Plan must be daily, weekly, or monthly.' })
@@ -35,6 +39,7 @@ export default defineEventHandler(async (event) => {
 
   const totalSessions = getPlanSessions(plan)
   const totalAmount = getPlanRate(plan, customerType)
+  const normalizedPhone = clientPhone ? normalizePhone(clientPhone) : ''
 
   const now = new Date()
   const startDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(now)
@@ -49,7 +54,7 @@ export default defineEventHandler(async (event) => {
     .insert({
       client_name: clientName,
       client_email: clientEmail,
-      client_phone: clientPhone,
+      client_phone: normalizedPhone,
       coach_name: coachName,
       plan,
       customer_type: customerType,
@@ -77,7 +82,7 @@ export default defineEventHandler(async (event) => {
     title: 'Client added',
     description: `${clientName} · ${plan} plan · ${totalSessions} sessions`,
     clientName,
-    clientPhone: clientPhone,
+    clientPhone: normalizedPhone,
     clientEmail: clientEmail,
     amount: paidAmount != null && !isNaN(paidAmount) ? paidAmount : null,
     reference: data.id,

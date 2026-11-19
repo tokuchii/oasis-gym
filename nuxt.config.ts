@@ -2,6 +2,7 @@ export default defineNuxtConfig({
   ssr: false,
   devtools: { enabled: process.env.NODE_ENV !== 'production' },
   experimental: {
+    appManifest: false,
     viteEnvironmentApi: true,
   },
 
@@ -21,7 +22,7 @@ export default defineNuxtConfig({
           content:
             'OASIS FITNESS GYM in Calauan, Laguna — premium equipment, expert coaching, and flexible membership plans. Join the oasis today.',
         },
-        { name: 'theme-color', content: '#0a0a0a' },
+        { name: 'theme-color', content: '#121212' },
         { property: 'og:title', content: 'OASIS FITNESS GYM — Calauan, Laguna' },
         {
           property: 'og:description',
@@ -41,6 +42,9 @@ export default defineNuxtConfig({
         },
       ],
       script: [
+        {
+          children: `(function(){var t=null;try{t=localStorage.getItem('oasis-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t='dark';try{if(window.matchMedia('(prefers-color-scheme: light)').matches)t='light'}catch(e){}}document.documentElement.setAttribute('data-theme',t);try{var m=document.querySelector('meta[name="theme-color"]');if(!m){m=document.createElement('meta');m.setAttribute('name','theme-color');document.head.appendChild(m)}m.setAttribute('content',t==='light'?'#FFFFFF':'#121212')}catch(e){}})();`,
+        },
         { children: "if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js') }" },
       ],
     },

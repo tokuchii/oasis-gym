@@ -167,7 +167,7 @@ onUnmounted(() => {
 <template>
   <div ref="pageRef" class="min-h-screen bg-onyx">
     <!-- Navigation -->
-    <header class="fixed top-0 left-0 right-0 z-50 bg-onyx/90 backdrop-blur-md border-b border-iron/50">
+    <header class="fixed top-0 left-0 right-0 z-50 bg-onyx/90 backdrop-blur-md border-b border-iron">
       <nav class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 flex items-center justify-between h-14 sm:h-16 lg:h-20">
         <a href="#" class="font-display text-xl sm:text-2xl lg:text-3xl text-gold tracking-widest" @click.prevent="scrollToTop">
           OASIS<span class="text-cream">FIT</span>
@@ -184,24 +184,28 @@ onUnmounted(() => {
           </li>
         </ul>
 
-        <button
-          type="button"
-          class="lg:hidden p-2 text-cream"
-          aria-label="Toggle menu"
-          @click="toggleMobileMenu"
-        >
-          <svg v-if="!mobileMenuOpen" class="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
-          <svg v-else class="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div class="flex items-center gap-2 sm:gap-3">
+          <ThemeToggle />
+
+          <button
+            type="button"
+            class="lg:hidden p-2 text-cream"
+            aria-label="Toggle menu"
+            @click="toggleMobileMenu"
+          >
+            <svg v-if="!mobileMenuOpen" class="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+            <svg v-else class="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </nav>
 
       <div
         v-show="mobileMenuOpen"
-        class="lg:hidden bg-obsidian border-t border-iron/50 px-3 sm:px-4 py-4 sm:py-6 space-y-2 sm:space-y-4"
+        class="lg:hidden bg-graphite border-t border-iron px-3 sm:px-4 py-4 sm:py-6 space-y-2 sm:space-y-4"
       >
         <a
           v-for="link in navLinks"
@@ -223,8 +227,7 @@ onUnmounted(() => {
         aria-hidden="true"
       />
       <div
-        class="absolute inset-0 opacity-20"
-        style="background-image: radial-gradient(circle at 20% 50%, #C9A84C 0%, transparent 50%), radial-gradient(circle at 80% 20%, #C9A84C 0%, transparent 40%)"
+        class="absolute inset-0 hero-glow"
         aria-hidden="true"
       />
 
@@ -243,14 +246,14 @@ onUnmounted(() => {
       </div>
 
       <div class="absolute bottom-4 sm:bottom-8 left-1/2 -translate-x-1/2 animate-bounce" aria-hidden="true">
-        <svg class="w-5 h-5 sm:w-6 sm:h-6 text-gold/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 sm:w-6 sm:h-6 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
         </svg>
       </div>
     </section>
 
     <!-- Ticker -->
-    <div class="border-y border-iron bg-obsidian overflow-hidden py-2 sm:py-3" aria-hidden="true">
+    <div class="border-y border-iron bg-graphite overflow-hidden py-2 sm:py-3" aria-hidden="true">
       <div class="flex animate-marquee whitespace-nowrap">
         <span
           v-for="(item, i) in [...tickerItems, ...tickerItems]"
@@ -258,7 +261,7 @@ onUnmounted(() => {
           class="mx-4 sm:mx-8 font-display text-gold text-sm sm:text-lg tracking-[0.2em] flex items-center gap-4 sm:gap-8"
         >
           {{ item }}
-          <span class="text-iron hidden sm:inline">◆</span>
+          <span class="text-mist hidden sm:inline">◆</span>
         </span>
       </div>
     </div>
@@ -298,7 +301,7 @@ onUnmounted(() => {
     </section>
 
     <!-- Gallery -->
-    <section id="gallery" class="py-10 sm:py-20 lg:py-32 bg-obsidian/50">
+    <section id="gallery" class="py-10 sm:py-20 lg:py-32 bg-graphite">
       <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
         <div class="text-center mb-6 sm:mb-12 reveal">
           <p class="section-label mb-2 sm:mb-3">Our Space</p>
@@ -314,17 +317,16 @@ onUnmounted(() => {
             <img
               :src="zone.img"
               :alt="zone.name"
-              class="absolute inset-0 w-full h-full object-cover brightness-110 transition-transform duration-500 group-hover:scale-105"
+              class="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
               loading="lazy"
               decoding="async"
               width="800"
               height="600"
             />
-            <div class="absolute inset-0 bg-gradient-to-b from-onyx/70 via-transparent to-onyx/70" />
             <div class="absolute inset-x-0 top-0 p-2.5 sm:p-4">
-              <span class="font-display text-cream text-base sm:text-xl tracking-wide drop-shadow-lg">{{ zone.name }}</span>
+              <span class="inline-block bg-onyx/70 px-2 py-1 font-display text-cream text-base sm:text-xl tracking-wide">{{ zone.name }}</span>
             </div>
-            <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-onyx/95 to-transparent p-2.5 sm:p-4 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
+            <div class="absolute inset-x-0 bottom-0 bg-onyx/90 p-2.5 sm:p-4 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
               <p class="text-cream/90 text-[11px] sm:text-sm">{{ zone.desc }}</p>
             </div>
           </div>
@@ -454,13 +456,13 @@ onUnmounted(() => {
             <div class="card overflow-hidden overflow-x-auto">
               <table class="w-full text-[11px] sm:text-sm min-w-[280px]">
                 <thead>
-                  <tr class="border-b border-iron">
+                  <tr class="bg-graphite border-b border-iron">
                     <th class="text-left p-2.5 sm:p-4 text-gold font-display tracking-wide">Day</th>
                     <th class="text-left p-2.5 sm:p-4 text-gold font-display tracking-wide">Hours</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="row in operatingHours" :key="row.day" class="border-b border-iron/50 last:border-0">
+                  <tr v-for="row in operatingHours" :key="row.day" class="border-b border-iron last:border-0">
                     <td class="p-2.5 sm:p-4 text-cream whitespace-nowrap">{{ row.day }}</td>
                     <td class="p-2.5 sm:p-4 text-mist whitespace-nowrap">{{ row.hours }}</td>
                   </tr>
@@ -472,13 +474,12 @@ onUnmounted(() => {
           <div class="reveal">
             <div class="aspect-[4/3] lg:aspect-auto lg:h-full min-h-[220px] sm:min-h-[300px] border border-iron overflow-hidden relative">
               <iframe
-                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3858.5!2d121.3138474!3d14.1459457!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x33bd5d00173de8f1%3A0xfff2ab31087057b5!2sOASIS+FITNESS+GYM+-+CALAUAN!5e0!3m2!1sen!2sph!4v1719000000000"
-                class="w-full h-full min-h-[220px] sm:min-h-[300px] grayscale contrast-125 opacity-80"
-                style="border:0; filter: invert(90%) hue-rotate(180deg);"
+                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3858.5!2d121.3138474!3d14.1459457!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x33bd5d00173de8f1%3A0xfff2ab31087057b5!2sOASIS+FITNESS+GYM+-+CALAUAN!5e1!3m2!1sen!2sph!4v1719000000000&amp;t=k"
+                class="w-full h-full min-h-[220px] sm:min-h-[300px] border-0"
+                title="OASIS Fitness Gym location on Google Maps satellite view"
                 allowfullscreen
                 loading="lazy"
                 referrerpolicy="no-referrer-when-downgrade"
-                title="OASIS FITNESS GYM location on Google Maps"
               />
             </div>
           </div>
@@ -499,7 +500,7 @@ onUnmounted(() => {
     </section>
 
     <!-- Footer -->
-    <footer class="py-8 sm:py-16 border-t border-iron">
+    <footer class="py-8 sm:py-16 border-t border-iron bg-graphite">
       <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-10 mb-8 sm:mb-12">
           <div>
@@ -549,7 +550,7 @@ onUnmounted(() => {
           <p>&copy; {{ new Date().getFullYear() }} OASIS FITNESS GYM. All rights reserved.</p>
           <div class="flex items-center gap-3 sm:gap-4">
             <p>Calauan, Laguna, Philippines</p>
-            <span class="text-iron">|</span>
+            <span class="text-mist">|</span>
             <NuxtLink to="/staff" class="text-mist hover:text-gold transition-colors">Are you a staff/admin?</NuxtLink>
           </div>
         </div>
@@ -559,11 +560,19 @@ onUnmounted(() => {
     <!-- Promo Modal -->
     <Teleport to="body">
       <Transition name="fade">
-        <div v-if="showPromo" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" @click.self="dismissPromo">
+        <div
+          v-if="showPromo"
+          class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/80"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Membership promo"
+          @click.self="dismissPromo"
+        >
           <div class="relative bg-graphite border border-iron max-w-md w-full p-6 sm:p-8 text-center">
             <button
               type="button"
               class="absolute top-3 right-3 text-mist hover:text-cream text-xl leading-none"
+              aria-label="Close promo"
               @click="dismissPromo"
             >
               &times;
@@ -607,7 +616,7 @@ onUnmounted(() => {
     <button
       v-show="showScrollTop"
       type="button"
-      class="fixed bottom-3 right-3 sm:bottom-6 sm:right-6 z-40 w-9 h-9 sm:w-12 sm:h-12 bg-gold text-onyx flex items-center justify-center shadow-lg hover:bg-gold-light transition-colors"
+      class="fixed bottom-3 right-3 sm:bottom-6 sm:right-6 z-40 w-9 h-9 sm:w-12 sm:h-12 bg-gold text-onyx flex items-center justify-center shadow-theme hover:bg-gold-light transition-colors"
       aria-label="Scroll to top"
       @click="scrollToTop"
     >
